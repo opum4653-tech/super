@@ -1,0 +1,60 @@
+name: Build gemini-cli
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ARM64 Executable
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+          add-to-path: true
+
+      - name: Build with ndk-build
+        run: |
+          set -o pipefail
+          echo "Starting ndk-build..."
+          if ! ndk-build NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=jni/Android.mk NDK_APPLICATION_MK=jni/Application.mk -j$(nproc) 2>&1 | tee build.log; then
+            echo "=== NDK BUILD FAILED ==="
+            grep -E "error:" build.log | head -n 30 | while read -r errline; do
+              echo "::error title=NDK Error::$errline"
+            done
+            tail -n 120 build.log
+            exit 1
+          fi
+          echo "Build finished. Optimizing and stripping ARM64 binary..."
+          STRIP_BIN=$(find "$ANDROID_NDK_ROOT" -name "llvm-strip" 2>/dev/null | head -n 1)
+          if [ -n "$STRIP_BIN" ] && [ -x "$STRIP_BIN" ]; then
+            echo "Stripping with $STRIP_BIN..."
+            "$STRIP_BIN" --strip-all --strip-debug --strip-unneeded libs/arm64-v8a/gemini-cli || true
+          fi
+          ls -lh libs/arm64-v8a/
+          echo "Packaging pure native gemini-cli into gemini-cli.zip..."
+          (cd libs/arm64-v8a && zip -9 gemini-cli.zip gemini-cli)
+          ls -lh libs/arm64-v8a/
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-failure-log
+          path: build.log
+
+      - name: Upload External Mod Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemini-cli.zip
+          path: libs/arm64-v8a/gemini-cli.zip
+          if-no-files-found: error

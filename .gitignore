@@ -1,0 +1,6 @@
+# Build outputs
+obj/
+/libs/
+*.o
+*.d
+*.bak
