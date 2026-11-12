@@ -76,31 +76,22 @@ static void DrawCircularLogo(ImDrawList* dl, ImVec2 center, float radius, bool s
 }
 
 // ----------------------------------------------------------------------------
-// NATIVE TOUCH-SCROLL HANDLER WITH KINETIC MOMENTUM & SMOOTH INTERPOLATION
+// NATIVE TOUCH-SCROLL HANDLER (AXIS-LOCKED GESTURE DISCRIMINATION)
 // ----------------------------------------------------------------------------
-static void handleTouchScroll(float ui_scale = 1.0f) {
+static void handleTouchScroll() {
     ImGuiIO& io = ImGui::GetIO();
     enum GestureState { GESTURE_IDLE, GESTURE_HORIZONTAL, GESTURE_VERTICAL };
     static GestureState s_gesture = GESTURE_IDLE;
     static ImVec2 s_touch_start = ImVec2(0, 0);
-    static float s_last_y = 0.0f;
-    static float s_velocity = 0.0f;
     static ImGuiID s_active_child = 0;
 
     ImGuiID child_id = ImGui::GetID("##TouchScrollToken");
-    const float touch_slop = 16.0f * ui_scale;
-
-    // Detect touch anywhere inside child window, even if hovering over active items
-    bool windowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
-                                                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
     if (io.MouseDown[0]) {
         if (s_gesture == GESTURE_IDLE) {
-            if (s_active_child == 0 && windowHovered) {
+            if (s_active_child == 0 && ImGui::IsWindowHovered()) {
                 s_touch_start = io.MousePos;
-                s_last_y = io.MousePos.y;
                 s_active_child = child_id;
-                s_velocity = 0.0f;
             }
         }
 
@@ -111,48 +102,24 @@ static void handleTouchScroll(float ui_scale = 1.0f) {
             float abs_dy = std::abs(dy);
 
             if (s_gesture == GESTURE_IDLE) {
-                if (abs_dy >= touch_slop && abs_dy > abs_dx * 1.15f) {
-                    s_gesture = GESTURE_VERTICAL;
-                    s_last_y = io.MousePos.y;
-                    // Cancel active item only once deliberate scroll has started
-                    ImGui::ClearActiveID();
-                } else if (abs_dx >= touch_slop && abs_dx > abs_dy * 1.15f) {
+                if (abs_dx >= 6.0f && abs_dx > abs_dy * 1.1f) {
                     s_gesture = GESTURE_HORIZONTAL;
+                } else if (abs_dy >= 6.0f && abs_dy > abs_dx * 1.1f) {
+                    s_gesture = GESTURE_VERTICAL;
                 }
             }
 
             if (s_gesture == GESTURE_VERTICAL) {
-                float current_y = io.MousePos.y;
-                float delta_y = current_y - s_last_y;
-                s_last_y = current_y;
-
+                ImGui::ClearActiveID();
+                float delta_y = io.MouseDelta.y;
                 if (std::abs(delta_y) > 0.01f) {
-                    float current_scroll = ImGui::GetScrollY();
-                    ImGui::SetScrollY(current_scroll - delta_y);
-                    s_velocity = s_velocity * 0.35f + delta_y * 0.65f;
+                    ImGui::SetScrollY(ImGui::GetScrollY() - delta_y);
                 }
             }
         }
     } else {
-        // Finger released: apply smooth kinetic inertia decay
-        if (s_gesture == GESTURE_VERTICAL && std::abs(s_velocity) > 0.5f) {
-            float current_scroll = ImGui::GetScrollY();
-            float max_scroll = ImGui::GetScrollMaxY();
-            float next_scroll = current_scroll - s_velocity;
-
-            if (next_scroll >= 0.0f && next_scroll <= max_scroll) {
-                ImGui::SetScrollY(next_scroll);
-                s_velocity *= 0.90f; // Smooth exponential friction
-            } else {
-                s_velocity = 0.0f;
-                s_gesture = GESTURE_IDLE;
-                s_active_child = 0;
-            }
-        } else {
-            s_velocity = 0.0f;
-            s_gesture = GESTURE_IDLE;
-            s_active_child = 0;
-        }
+        s_gesture = GESTURE_IDLE;
+        s_active_child = 0;
     }
 }
 
@@ -161,7 +128,6 @@ static void handleTouchScroll(float ui_scale = 1.0f) {
 // ----------------------------------------------------------------------------
 static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, float ui_scale = 1.0f) {
     bool pressed = ImGui::InvisibleButton(label, size);
-    bool clicked = ImGui::IsItemClicked(0);
     bool hovered = ImGui::IsItemHovered();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -191,7 +157,7 @@ static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, flo
         dl->AddText(font, fontSize, tpos, hovered ? theme_crackmaster::ColTextWhite : theme_crackmaster::ColTextMuted, label);
     }
 
-    return pressed || clicked;
+    return pressed;
 }
 
 // ----------------------------------------------------------------------------
@@ -200,7 +166,6 @@ static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, flo
 static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, float size, float ui_scale = 1.0f) {
     ImGui::SetCursorScreenPos(pos);
     bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
-    bool clicked = ImGui::IsItemClicked(0);
     bool hovered = ImGui::IsItemHovered();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -218,7 +183,7 @@ static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, fl
     ImVec2 tpos(bMin.x + (size - tsz.x) * 0.5f, bMin.y + (size - tsz.y) * 0.5f);
     dl->AddText(font, fontSize, tpos, theme_crackmaster::ColTextWhite, text);
 
-    return pressed || clicked;
+    return pressed;
 }
 
 // ----------------------------------------------------------------------------
@@ -399,8 +364,7 @@ namespace ui::menu {
             if (active && !s_is_dragging) {
                 float dx = mouse.x - s_touch_start_pos.x;
                 float dy = mouse.y - s_touch_start_pos.y;
-                float dragThresh = 24.0f * ui_scale;
-                if ((dx * dx + dy * dy) > (dragThresh * dragThresh)) {
+                if ((dx * dx + dy * dy) > (14.0f * 14.0f)) {
                     s_is_dragging = true;
                     s_moved_drag = true;
                 }
@@ -610,7 +574,7 @@ namespace ui::menu {
                     ImGui::Text("Architecture: Direct DMA Kernel Memory");
                     ImGui::Text("Screen Capture: Stealth / Clean Stream");
 
-                    handleTouchScroll(ui_scale);
+                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 1: VISUAL (EXACT REPLICA OF USER SCREENSHOT)
@@ -658,7 +622,7 @@ namespace ui::menu {
                     ImGui::SliderFloat("##BoxThickness", &cfg::esp::box_thickness, 1.0f, 5.0f, "%.1f px");
                     ImGui::TextDisabled("Box Border Width");
 
-                    handleTouchScroll(ui_scale);
+                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 2: AIMBOT
@@ -704,7 +668,7 @@ namespace ui::menu {
                     ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 1.0f, 25.0f, "%.1f");
                     ImGui::TextDisabled("Aim Smoothness");
 
-                    handleTouchScroll(ui_scale);
+                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 3: SETTINGS
@@ -721,7 +685,7 @@ namespace ui::menu {
                         g_should_exit = true;
                     }
 
-                    handleTouchScroll(ui_scale);
+                    handleTouchScroll();
                 }
 
                 ImGui::PopStyleVar(3);
