@@ -366,35 +366,51 @@ namespace lic {
             return false;
         }
 
-        if (strstr(response, "\"status\":true")) {
+        // Match both "status":true and "status": true (server may add space)
+        bool status_ok = (strstr(response, "\"status\":true") != nullptr)
+                      || (strstr(response, "\"status\": true") != nullptr);
+
+        if (status_ok) {
             time_t now = time(nullptr);
             time_t expiry_ts = 0;
 
             // Parse expired_date: "Y-m-d H:i:s" UTC+6 (Asia/Dhaka)
             // api_config.json: expired_date field, format "2026-12-01 18:30:00"
+            // We build the UTC epoch manually to avoid mktime() local-timezone dependency.
             const char* expPtr = strstr(response, "\"expired_date\":\"");
             if (expPtr) {
-                expPtr += 16; // skip past the key+quote
+                expPtr += 16; // skip past field key + opening quote
                 int yr = 0, mo = 0, dy = 0, hr = 0, mi = 0, sc = 0;
                 if (sscanf(expPtr, "%d-%d-%d %d:%d:%d", &yr, &mo, &dy, &hr, &mi, &sc) == 6
                     && yr >= 2024 && mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
-                    struct tm t = {};
-                    t.tm_year  = yr - 1900;
-                    t.tm_mon   = mo - 1;
-                    t.tm_mday  = dy;
-                    t.tm_hour  = hr;
-                    t.tm_min   = mi;
-                    t.tm_sec   = sc;
-                    t.tm_isdst = -1;
-                    // Server time is UTC+6; convert to UTC by subtracting 6 hours
-                    time_t server_epoch = mktime(&t);   // interprets as local time
-                    // If we can't rely on timezone, subtract 6h offset manually:
-                    // server sends UTC+6 so UTC = server_epoch - 21600
-                    expiry_ts = server_epoch - 21600;
+
+                    // Days per month (non-leap) — good enough: server expiry is days away
+                    static const int kDays[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+
+                    // Days since Unix epoch (1970-01-01 UTC) for given UTC+6 date
+                    // Convert UTC+6 → UTC: subtract 6 hours = subtract 21600 seconds
+                    long days = 0;
+                    for (int y = 1970; y < yr; ++y) {
+                        bool leap = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+                        days += leap ? 366 : 365;
+                    }
+                    bool is_leap = (yr % 4 == 0 && (yr % 100 != 0 || yr % 400 == 0));
+                    for (int m = 1; m < mo; ++m) {
+                        days += kDays[m];
+                        if (m == 2 && is_leap) days += 1;
+                    }
+                    days += dy - 1;
+
+                    // Seconds since epoch in UTC+6, then subtract 6h to get UTC
+                    expiry_ts = (time_t)(days * 86400LL
+                                        + hr * 3600LL
+                                        + mi * 60LL
+                                        + sc
+                                        - 21600LL);  // UTC+6 → UTC
                 }
             }
 
-            // Fallback: remaining_seconds field if server ever adds it
+            // Fallback: remaining_seconds field
             if (expiry_ts == 0) {
                 const char* remPtr = strstr(response, "\"remaining_seconds\":");
                 if (remPtr) {

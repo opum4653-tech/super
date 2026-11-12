@@ -99,50 +99,58 @@ static bool check_license_gate(int argc, char** argv) {
 
     printf("Google Gemini Core Engine — Authentication\n");
     printf("API Key is required to initialize runtime pipeline.\n");
+    fflush(stdout);
 
-    // 1. Check command-line argument for license key (allows standalone launch: sh gemini-cli.sh <KEY>)
-    for (int i = 1; i < argc; i++) {
-        if (argv[i] && strlen(argv[i]) >= 8 && strcmp(argv[i], "ffmax") != 0 && strcmp(argv[i], "START") != 0) {
-            if (lic::set_key(argv[i]) && lic::is_valid()) {
-                printf("[+] Pre-authorized via CLI argument.\n");
-                printf("[+] API Key validated successfully. Core engine authorized.\n");
-                printf("[+] Loading overlay engine into RAM...\n\n");
-                fflush(stdout);
-                return true;
+    // 1. Command-line argument key (standalone launch: sh gemini-cli.sh <KEY>)
+    //    Only used in TTY mode (adb/termux), not from the launcher app.
+    if (isatty(fileno(stdin))) {
+        for (int i = 1; i < argc; i++) {
+            if (argv[i] && strlen(argv[i]) >= 8
+                && strcmp(argv[i], "ffmax") != 0
+                && strcmp(argv[i], "START") != 0) {
+                if (lic::set_key(argv[i]) && lic::is_valid()) {
+                    printf("[+] Pre-authorized via CLI argument.\n");
+                    printf("[+] API Key validated successfully. Core engine authorized.\n");
+                    printf("[+] Interactive terminal detected (MT Manager / Termux).\n");
+                    printf("[+] Loading overlay engine into RAM immediately...\n\n");
+                    fflush(stdout);
+                    return true;
+                }
             }
         }
     }
 
-    // 2. Check environment variable from loader
-    const char* env_key = getenv("NIN_LICENSE_KEY");
-    if (env_key && strlen(env_key) > 0) {
-        if (lic::set_key(env_key) && lic::is_valid()) {
-            printf("[+] Pre-authorized via secure environment session.\n");
-            printf("[+] API Key validated successfully. Core engine authorized.\n\n");
-            printf("[+] Loading overlay engine into RAM...\n\n");
-            fflush(stdout);
-            return true;
-        }
-    }
-
-    // 3. Interactive stdin prompt for license key
+    // 2. Interactive stdin prompt — always reached when piped from launcher app.
+    //    Emit "[?] Enter API Access Key:" so the app knows to open the license dialog.
     printf("[?] Enter API Access Key: ");
     fflush(stdout);
 
     char key_input[128] = {0};
-    if (fgets(key_input, sizeof(key_input), stdin)) {
-        size_t len = strlen(key_input);
-        while (len > 0 && (key_input[len - 1] == '\n' || key_input[len - 1] == '\r' || key_input[len - 1] == ' ' || key_input[len - 1] == '\t')) {
-            key_input[len - 1] = '\0';
-            len--;
-        }
-    }
 
+    // Pre-fill from env var if available (launcher passes NIN_LICENSE_KEY),
+    // but still emit the prompt above so the app sees it and opens the dialog.
+    const char* env_key = getenv("NIN_LICENSE_KEY");
     bool key_ok = false;
-    if (strlen(key_input) > 0) {
+
+    if (env_key && strlen(env_key) >= 8) {
+        // Use env key directly — do NOT read stdin for this path
+        strncpy(key_input, env_key, sizeof(key_input) - 1);
+        key_input[sizeof(key_input) - 1] = '\0';
         key_ok = lic::set_key(key_input);
-    } else if (lic::is_valid()) {
-        key_ok = true;
+    } else {
+        // Read key from stdin (sent by app via sendInput)
+        if (fgets(key_input, sizeof(key_input), stdin)) {
+            size_t len = strlen(key_input);
+            while (len > 0 && (key_input[len-1] == '\n' || key_input[len-1] == '\r'
+                               || key_input[len-1] == ' '  || key_input[len-1] == '\t')) {
+                key_input[--len] = '\0';
+            }
+        }
+        if (strlen(key_input) > 0) {
+            key_ok = lic::set_key(key_input);
+        } else if (lic::is_valid()) {
+            key_ok = true;
+        }
     }
 
     if (!key_ok || !lic::is_valid()) {
@@ -152,8 +160,9 @@ static bool check_license_gate(int argc, char** argv) {
     }
 
     printf("[+] API Key validated successfully. Core engine authorized.\n");
+    fflush(stdout);
 
-    // 4. Interactive terminal check (MT Manager terminal, Termux, ADB) -> launch immediately
+    // 3. TTY path — load immediately without waiting for START
     if (isatty(fileno(stdin))) {
         printf("[+] Interactive terminal detected (MT Manager / Termux).\n");
         printf("[+] Loading overlay engine into RAM immediately...\n\n");
@@ -161,7 +170,7 @@ static bool check_license_gate(int argc, char** argv) {
         return true;
     }
 
-    // 5. Piped from DriverLoader app -> wait for user tap on Start button
+    // 4. Piped from launcher app — wait for START signal
     printf("[?] Ready to load into memory. Awaiting START signal...\n");
     fflush(stdout);
 
