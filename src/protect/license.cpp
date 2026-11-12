@@ -368,28 +368,60 @@ namespace lic {
 
         if (strstr(response, "\"status\":true")) {
             time_t now = time(nullptr);
-            long remSec = 86400;
-            const char* remPtr = strstr(response, "\"remaining_seconds\":");
-            if (remPtr) {
-                long parsed = atol(remPtr + 20);
-                if (parsed > 0) remSec = parsed;
+            time_t expiry_ts = 0;
+
+            // Parse expired_date: "Y-m-d H:i:s" UTC+6 (Asia/Dhaka)
+            // api_config.json: expired_date field, format "2026-12-01 18:30:00"
+            const char* expPtr = strstr(response, "\"expired_date\":\"");
+            if (expPtr) {
+                expPtr += 16; // skip past the key+quote
+                int yr = 0, mo = 0, dy = 0, hr = 0, mi = 0, sc = 0;
+                if (sscanf(expPtr, "%d-%d-%d %d:%d:%d", &yr, &mo, &dy, &hr, &mi, &sc) == 6
+                    && yr >= 2024 && mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
+                    struct tm t = {};
+                    t.tm_year  = yr - 1900;
+                    t.tm_mon   = mo - 1;
+                    t.tm_mday  = dy;
+                    t.tm_hour  = hr;
+                    t.tm_min   = mi;
+                    t.tm_sec   = sc;
+                    t.tm_isdst = -1;
+                    // Server time is UTC+6; convert to UTC by subtracting 6 hours
+                    time_t server_epoch = mktime(&t);   // interprets as local time
+                    // If we can't rely on timezone, subtract 6h offset manually:
+                    // server sends UTC+6 so UTC = server_epoch - 21600
+                    expiry_ts = server_epoch - 21600;
+                }
             }
 
-            s_last_seen_ts = now;
-            s_stored_key = key;
+            // Fallback: remaining_seconds field if server ever adds it
+            if (expiry_ts == 0) {
+                const char* remPtr = strstr(response, "\"remaining_seconds\":");
+                if (remPtr) {
+                    long parsed = atol(remPtr + 20);
+                    if (parsed > 0) expiry_ts = now + parsed;
+                }
+            }
+
+            // Last fallback: 24-hour offline grace
+            if (expiry_ts == 0) expiry_ts = now + 86400;
+
+            s_last_seen_ts    = now;
+            s_stored_key      = key;
             s_online_verified = true;
-            s_online_expiry_ts = now + remSec;
-            s_is_valid = true;
-            s_clock_tampered = false;
+            s_online_expiry_ts = expiry_ts;
+            s_is_valid        = true;
+            s_clock_tampered  = false;
             save_state_to_disk();
             return true;
         }
 
-        const char* errPtr = strstr(response, "\"error\":\"");
+        // api_config.json error field is "reason", not "error"
+        const char* errPtr = strstr(response, "\"reason\":\"");
         if (errPtr) {
             char errMsg[256] = {0};
-            sscanf(errPtr + 9, "%255[^\"]", errMsg);
-            printf("[-] License Server: %s\n", errMsg);
+            sscanf(errPtr + 10, "%255[^\"]", errMsg);
+            printf("[-] Authentication failed: %s\n", errMsg);
             fflush(stdout);
         }
         s_is_valid = false;
