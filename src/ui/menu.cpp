@@ -76,24 +76,31 @@ static void DrawCircularLogo(ImDrawList* dl, ImVec2 center, float radius, bool s
 }
 
 // ----------------------------------------------------------------------------
-// NATIVE TOUCH-SCROLL HANDLER (AXIS-LOCKED GESTURE DISCRIMINATION)
+// NATIVE TOUCH-SCROLL HANDLER WITH KINETIC MOMENTUM & SMOOTH INTERPOLATION
 // ----------------------------------------------------------------------------
 static void handleTouchScroll(float ui_scale = 1.0f) {
     ImGuiIO& io = ImGui::GetIO();
     enum GestureState { GESTURE_IDLE, GESTURE_HORIZONTAL, GESTURE_VERTICAL };
     static GestureState s_gesture = GESTURE_IDLE;
     static ImVec2 s_touch_start = ImVec2(0, 0);
+    static float s_last_y = 0.0f;
+    static float s_velocity = 0.0f;
     static ImGuiID s_active_child = 0;
 
     ImGuiID child_id = ImGui::GetID("##TouchScrollToken");
-    // Android standard touch slop (~28px-34px) so minor finger tremors during tap won't cancel button clicks
-    const float touch_slop = 28.0f * ui_scale;
+    const float touch_slop = 16.0f * ui_scale;
+
+    // Detect touch anywhere inside child window, even if hovering over active items
+    bool windowHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
+                                                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
     if (io.MouseDown[0]) {
         if (s_gesture == GESTURE_IDLE) {
-            if (s_active_child == 0 && ImGui::IsWindowHovered()) {
+            if (s_active_child == 0 && windowHovered) {
                 s_touch_start = io.MousePos;
+                s_last_y = io.MousePos.y;
                 s_active_child = child_id;
+                s_velocity = 0.0f;
             }
         }
 
@@ -104,25 +111,48 @@ static void handleTouchScroll(float ui_scale = 1.0f) {
             float abs_dy = std::abs(dy);
 
             if (s_gesture == GESTURE_IDLE) {
-                if (abs_dy >= touch_slop && abs_dy > abs_dx * 1.2f) {
+                if (abs_dy >= touch_slop && abs_dy > abs_dx * 1.15f) {
                     s_gesture = GESTURE_VERTICAL;
-                    // Only cancel button ActiveID when a deliberate scroll gesture is underway
+                    s_last_y = io.MousePos.y;
+                    // Cancel active item only once deliberate scroll has started
                     ImGui::ClearActiveID();
-                } else if (abs_dx >= touch_slop && abs_dx > abs_dy * 1.2f) {
+                } else if (abs_dx >= touch_slop && abs_dx > abs_dy * 1.15f) {
                     s_gesture = GESTURE_HORIZONTAL;
                 }
             }
 
             if (s_gesture == GESTURE_VERTICAL) {
-                float delta_y = io.MouseDelta.y;
+                float current_y = io.MousePos.y;
+                float delta_y = current_y - s_last_y;
+                s_last_y = current_y;
+
                 if (std::abs(delta_y) > 0.01f) {
-                    ImGui::SetScrollY(ImGui::GetScrollY() - delta_y);
+                    float current_scroll = ImGui::GetScrollY();
+                    ImGui::SetScrollY(current_scroll - delta_y);
+                    s_velocity = s_velocity * 0.35f + delta_y * 0.65f;
                 }
             }
         }
     } else {
-        s_gesture = GESTURE_IDLE;
-        s_active_child = 0;
+        // Finger released: apply smooth kinetic inertia decay
+        if (s_gesture == GESTURE_VERTICAL && std::abs(s_velocity) > 0.5f) {
+            float current_scroll = ImGui::GetScrollY();
+            float max_scroll = ImGui::GetScrollMaxY();
+            float next_scroll = current_scroll - s_velocity;
+
+            if (next_scroll >= 0.0f && next_scroll <= max_scroll) {
+                ImGui::SetScrollY(next_scroll);
+                s_velocity *= 0.90f; // Smooth exponential friction
+            } else {
+                s_velocity = 0.0f;
+                s_gesture = GESTURE_IDLE;
+                s_active_child = 0;
+            }
+        } else {
+            s_velocity = 0.0f;
+            s_gesture = GESTURE_IDLE;
+            s_active_child = 0;
+        }
     }
 }
 
