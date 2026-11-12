@@ -259,8 +259,7 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
     snprintf(btn_id, sizeof(btn_id), "##SwitchBtn_%s", label);
 
     bool pressed = ImGui::InvisibleButton(btn_id, ImVec2(availW, row_height));
-    bool clicked = ImGui::IsItemClicked(0);
-    if (pressed || clicked) {
+    if (pressed) {
         *v = !(*v);
     }
 
