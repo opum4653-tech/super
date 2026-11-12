@@ -14,7 +14,7 @@
 #include <android/log.h>
 #include <curl/curl.h>
 
-#define LIC_LOG_TAG "ninmods_lic"
+#define LIC_LOG_TAG "crackmaster_lic"
 #define LIC_LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LIC_LOG_TAG, __VA_ARGS__)
 #define LIC_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LIC_LOG_TAG, __VA_ARGS__)
 
@@ -103,10 +103,9 @@ static std::string get_storage_path() {
     }
 
     const char* loader_dirs[] = {
-        "/data/data/com.andorid.ninmods/files/logs",
-        "/data/data/com.andorid.ninmods/files",
-        "/data/user/0/com.andorid.ninmods/files",
-        "/sdcard/Android/data/com.andorid.ninmods/files"
+        "/data/data/com.andorid.crackmaster/files",
+        "/data/user/0/com.andorid.crackmaster/files",
+        "/sdcard/Android/data/com.andorid.crackmaster/files"
     };
     for (const char* ld : loader_dirs) {
         mkdir(ld, 0777);
@@ -240,9 +239,9 @@ namespace lic {
         }
 
         const char* hwid_candidates[] = {
-            "/data/data/com.andorid.ninmods/files/.nin_hwid",
-            "/data/user/0/com.andorid.ninmods/files/.nin_hwid",
-            "/sdcard/Android/data/com.andorid.ninmods/files/.nin_hwid"
+            "/data/data/com.andorid.crackmaster/files/.nin_hwid",
+            "/data/user/0/com.andorid.crackmaster/files/.nin_hwid",
+            "/sdcard/Android/data/com.andorid.crackmaster/files/.nin_hwid"
         };
         for (const char* path : hwid_candidates) {
             FILE* fp_file = fopen(path, "r");
@@ -289,8 +288,8 @@ namespace lic {
 
     static bool verify_license_online(const std::string& key) {
         std::string hwid = get_device_hwid();
-        std::string server_url = "https://ninmods.smmtor.com";
-        const char* env_url = getenv("NIN_SERVER_URL");
+        std::string server_url = "https://crackmaster.shop";
+        const char* env_url = getenv("CRACKMASTER_SERVER_URL");
         if (env_url && strlen(env_url) > 0) {
             server_url = std::string(env_url);
         }
@@ -301,15 +300,15 @@ namespace lic {
         CURL* curl = curl_easy_init();
         if (curl) {
             std::string curl_resp;
-            std::string endpoint = server_url + "/api/v2/app/activate";
-            std::string json_body = "{\"license_key\":\"" + key + "\",\"hwid\":\"" + hwid + "\"}";
+            std::string endpoint = server_url + "/api/verify.php";
+            std::string post_fields = "user_key=" + key + "&serial=" + hwid + "&game=FreeFire";
 
             struct curl_slist* headers = nullptr;
-            headers = curl_slist_append(headers, "Content-Type: application/json");
+            headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
             headers = curl_slist_append(headers, "Accept: application/json");
 
             curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_body.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_fields.c_str());
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_string_cb);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &curl_resp);
@@ -340,11 +339,11 @@ namespace lic {
                 char cmd[1536];
                 if (strstr(client, "wget")) {
                     snprintf(cmd, sizeof(cmd),
-                        "%s --header='Content-Type: application/json' --post-data='{\"license_key\":\"%s\",\"hwid\":\"%s\"}' %s/api/v2/app/activate 2>/dev/null",
+                        "%s --header='Content-Type: application/x-www-form-urlencoded' --post-data='user_key=%s&serial=%s&game=FreeFire' %s/api/verify.php 2>/dev/null",
                         client, key.c_str(), hwid.c_str(), server_url.c_str());
                 } else {
                     snprintf(cmd, sizeof(cmd),
-                        "%s -X POST -H 'Content-Type: application/json' -d '{\"license_key\":\"%s\",\"hwid\":\"%s\"}' %s/api/v2/app/activate 2>/dev/null",
+                        "%s -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d 'user_key=%s&serial=%s&game=FreeFire' %s/api/verify.php 2>/dev/null",
                         client, key.c_str(), hwid.c_str(), server_url.c_str());
                 }
 
@@ -367,11 +366,7 @@ namespace lic {
             return false;
         }
 
-        if (strstr(response, "\"success\":true") || 
-            strstr(response, "\"valid\":true") ||
-            strstr(response, "\"status\":\"active\"") || 
-            strstr(response, "\"status\":\"activated\"") || 
-            strstr(response, "\"status\":true")) {
+        if (strstr(response, "\"status\":true")) {
             time_t now = time(nullptr);
             long remSec = 86400;
             const char* remPtr = strstr(response, "\"remaining_seconds\":");
