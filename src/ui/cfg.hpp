@@ -46,7 +46,7 @@ namespace aim {
     inline bool  sniper_aim       = true;  // Sniper Headshot Mode: Auto-locks skull on scope/hold-fire
     inline bool  show_fov         = false;
     inline float fov_radius       = 180.0f;
-    inline float smooth           = 6.0f;
+    inline float smooth           = 5.0f;   // Safe default: smooth lerp (1=snap, 10=slow). Range 3-8 looks natural.
     inline float headshot_rate    = 100.0f; // 0% to 100% (Adjustable headshot connection rate)
     inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV

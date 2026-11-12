@@ -53,13 +53,18 @@ namespace aimbot {
     inline int      s_burstTicks       = 0;
     inline Vector3  s_prevDir          = Vector3::Zero();
 
+    // ── SMOOTH DIRECTION LERP STATE ──────────────────────────────────────────
+    // Tracks the last written shot direction so lerp interpolates from it each frame.
+    inline Vector3 s_smoothDir = Vector3::Zero();
+
     inline void update() {
         g_currentTarget.valid = false;
         if (!cfg::aim::enable) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
             s_burstTicks = 0;
-            s_prevDir = Vector3::Zero();
+            s_prevDir   = Vector3::Zero();
+            s_smoothDir = Vector3::Zero();
             return;
         }
         if (!data::inMatch.load(std::memory_order_relaxed)) {
@@ -116,7 +121,8 @@ namespace aimbot {
             } else {
                 s_lockedTargetAddr = 0;
                 s_burstTicks = 0;
-                s_prevDir = Vector3::Zero();
+                s_prevDir   = Vector3::Zero();
+                s_smoothDir = Vector3::Zero();
             }
             return;
         }
@@ -294,8 +300,24 @@ namespace aimbot {
                     Vector3 diff = target3D - bulletOrigin;
                     Vector3 shotDir = SafeNormalize(diff);
                     if (std::isfinite(shotDir.x) && std::isfinite(shotDir.y) && std::isfinite(shotDir.z)) {
-                        // Direct snap: zero smoothing lag so bullets lock onto the target direction
-                        wpm<Vector3>(dirAddr, shotDir);
+
+                        // ── SMOOTH LERP WRITE (Human-like, not instant snap) ──────────────
+                        // cfg::aim::smooth: 1.0 = instant snap (original), 10.0 = very slow
+                        // Safe range: 3.0 – 8.0 looks natural, hard to fingerprint.
+                        float lerpT = 1.0f / std::max(1.0f, cfg::aim::smooth);
+
+                        // Bootstrap s_smoothDir on first lock or after reset
+                        if (s_smoothDir.sqrMagnitude() < 1e-6f) {
+                            s_smoothDir = shotDir;
+                        }
+
+                        // Lerp component-wise toward target direction
+                        s_smoothDir.x += (shotDir.x - s_smoothDir.x) * lerpT;
+                        s_smoothDir.y += (shotDir.y - s_smoothDir.y) * lerpT;
+                        s_smoothDir.z += (shotDir.z - s_smoothDir.z) * lerpT;
+                        s_smoothDir = SafeNormalize(s_smoothDir);
+
+                        wpm<Vector3>(dirAddr, s_smoothDir);
                         wpm<bool>(aimInfo + 0x71, false);
 
                         if (lockToHead) {
@@ -305,12 +327,19 @@ namespace aimbot {
                             }
                         }
 
-                        // Lock weapon recoil to zero so multi-bullet spray stays on target
+                        // ── SAFE PARTIAL RECOIL REDUCTION (not zeroing — reduces signature) ──
+                        // Reads current recoil and writes it back multiplied by 0.12f.
+                        // Result: ~88% reduction per frame → spray still rises slightly
+                        // but stays on target. No constant-zero pattern.
                         uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player::Weapon);
                         if (is_valid_ptr(weapon)) {
                             uint64_t wdata = rpm<uint64_t>(weapon + Offsets::Weapon::Data);
                             if (is_valid_ptr(wdata)) {
-                                wpm<float>(wdata + Offsets::Weapon::Recoil, 0.0f);
+                                float currentRecoil = rpm<float>(wdata + Offsets::Weapon::Recoil);
+                                if (std::isfinite(currentRecoil) && currentRecoil > 0.001f) {
+                                    // Dampen to 12% — functionally near-zero but not a flat 0.0f
+                                    wpm<float>(wdata + Offsets::Weapon::Recoil, currentRecoil * 0.12f);
+                                }
                             }
                         }
                     }
