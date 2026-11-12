@@ -126,32 +126,35 @@ static void handleTouchScroll() {
 // ----------------------------------------------------------------------------
 // CUSTOM WIDGET: TOP NAVIGATION TAB BUTTON
 // ----------------------------------------------------------------------------
-static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size) {
+static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, float ui_scale = 1.0f) {
     bool pressed = ImGui::InvisibleButton(label, size);
     bool hovered = ImGui::IsItemHovered();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 bMin = ImGui::GetItemRectMin();
     ImVec2 bMax = ImGui::GetItemRectMax();
-    float rounding = 6.0f;
+    float rounding = 8.0f * ui_scale;
+
+    ImFont* font = ImGui::GetFont();
+    float fontSize = 18.0f * ui_scale;
 
     if (is_active) {
         // Solid vivid green background
         dl->AddRectFilled(bMin, bMax, theme_crackmaster::ColActiveTab, rounding);
         // Clean bold white text
-        ImVec2 tsz = ImGui::CalcTextSize(label);
+        ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
         ImVec2 tpos(bMin.x + (size.x - tsz.x) * 0.5f, bMin.y + (size.y - tsz.y) * 0.5f);
-        dl->AddText(tpos, theme_crackmaster::ColTextWhite, label);
+        dl->AddText(font, fontSize, tpos, theme_crackmaster::ColTextWhite, label);
     } else {
         // Dark olive background
         ImU32 bgCol = hovered ? IM_COL32(26, 36, 26, 255) : theme_crackmaster::ColInactiveTabBg;
         dl->AddRectFilled(bMin, bMax, bgCol, rounding);
         // Subtle border
-        dl->AddRect(bMin, bMax, theme_crackmaster::ColInactiveTabBdr, rounding, 0, 1.0f);
+        dl->AddRect(bMin, bMax, theme_crackmaster::ColInactiveTabBdr, rounding, 0, 1.2f);
         // Light silver text
-        ImVec2 tsz = ImGui::CalcTextSize(label);
+        ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
         ImVec2 tpos(bMin.x + (size.x - tsz.x) * 0.5f, bMin.y + (size.y - tsz.y) * 0.5f);
-        dl->AddText(tpos, hovered ? theme_crackmaster::ColTextWhite : theme_crackmaster::ColTextMuted, label);
+        dl->AddText(font, fontSize, tpos, hovered ? theme_crackmaster::ColTextWhite : theme_crackmaster::ColTextMuted, label);
     }
 
     return pressed;
@@ -160,7 +163,7 @@ static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size) {
 // ----------------------------------------------------------------------------
 // CUSTOM WIDGET: TOP-RIGHT SQUARE CONTROL BUTTONS ([ L ] and [ - ])
 // ----------------------------------------------------------------------------
-static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, float size) {
+static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, float size, float ui_scale = 1.0f) {
     ImGui::SetCursorScreenPos(pos);
     bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
     bool hovered = ImGui::IsItemHovered();
@@ -168,15 +171,17 @@ static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, fl
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 bMin = pos;
     ImVec2 bMax(pos.x + size, pos.y + size);
-    float rounding = 4.0f;
+    float rounding = 6.0f * ui_scale;
 
     ImU32 bgCol = hovered ? IM_COL32(32, 42, 32, 255) : theme_crackmaster::ColTopBtnBg;
     dl->AddRectFilled(bMin, bMax, bgCol, rounding);
-    dl->AddRect(bMin, bMax, theme_crackmaster::ColTopBtnBdr, rounding, 0, 1.0f);
+    dl->AddRect(bMin, bMax, theme_crackmaster::ColTopBtnBdr, rounding, 0, 1.2f);
 
-    ImVec2 tsz = ImGui::CalcTextSize(text);
+    ImFont* font = ImGui::GetFont();
+    float fontSize = size * 0.55f;
+    ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
     ImVec2 tpos(bMin.x + (size - tsz.x) * 0.5f, bMin.y + (size - tsz.y) * 0.5f);
-    dl->AddText(tpos, theme_crackmaster::ColTextWhite, text);
+    dl->AddText(font, fontSize, tpos, theme_crackmaster::ColTextWhite, text);
 
     return pressed;
 }
@@ -184,30 +189,34 @@ static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, fl
 // ----------------------------------------------------------------------------
 // CUSTOM WIDGET: SECTION HEADER WITH VERTICAL NEON GREEN ACCENT PILL
 // ----------------------------------------------------------------------------
-static void DrawSectionHeader(ImDrawList* dl, const char* label) {
+static void DrawSectionHeader(ImDrawList* dl, const char* label, float ui_scale = 1.0f) {
     ImVec2 cur = ImGui::GetCursorScreenPos();
-    float barW = 3.5f;
-    float barH = 18.0f;
-    float padY = 2.0f;
+    float barW = 4.5f * ui_scale;
+    float barH = 22.0f * ui_scale;
+    float padY = 2.0f * ui_scale;
 
     // Draw vertical neon green accent pill
     dl->AddRectFilled(
         ImVec2(cur.x, cur.y + padY),
         ImVec2(cur.x + barW, cur.y + padY + barH),
         theme_crackmaster::ColAccentBar,
-        2.0f
+        2.5f
     );
 
     // Text starting cleanly after the accent bar
-    ImGui::SetCursorScreenPos(ImVec2(cur.x + barW + 8.0f, cur.y));
-    ImGui::TextColored(ImVec4(0.98f, 0.98f, 0.98f, 1.0f), "%s", label);
-    ImGui::Dummy(ImVec2(0, 4.0f));
+    ImFont* font = ImGui::GetFont();
+    float fontSize = 18.0f * ui_scale;
+    ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
+    ImVec2 tpos(cur.x + barW + 10.0f * ui_scale, cur.y + (barH + padY * 2.0f - tsz.y) * 0.5f);
+    dl->AddText(font, fontSize, tpos, IM_COL32(250, 250, 250, 255), label);
+
+    ImGui::SetCursorScreenPos(ImVec2(cur.x, cur.y + barH + 8.0f * ui_scale));
 }
 
 // ----------------------------------------------------------------------------
 // CUSTOM WIDGET: PILL TOGGLE SWITCH (EXACT REPLICA OF USER SCREENSHOT)
 // ----------------------------------------------------------------------------
-static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 36.0f) {
+static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0f, float ui_scale = 1.0f) {
     ImVec2 curPos = ImGui::GetCursorScreenPos();
     float availW = ImGui::GetContentRegionAvail().x;
 
@@ -222,15 +231,17 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 36.0
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     // 1. Label on the left, vertically centered
-    float fontH = ImGui::GetFontSize();
-    ImVec2 label_pos(curPos.x + 4.0f, curPos.y + (row_height - fontH) * 0.5f);
-    dl->AddText(label_pos, theme_crackmaster::ColTextWhite, label);
+    ImFont* font = ImGui::GetFont();
+    float fontSize = 17.0f * ui_scale;
+    ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
+    ImVec2 label_pos(curPos.x + 8.0f * ui_scale, curPos.y + (row_height - tsz.y) * 0.5f);
+    dl->AddText(font, fontSize, label_pos, theme_crackmaster::ColTextWhite, label);
 
     // 2. Capsule / Pill switch on the right
-    float switchW = 50.0f;
-    float switchH = 26.0f;
+    float switchW = 58.0f * ui_scale;
+    float switchH = 30.0f * ui_scale;
     float switchRounding = switchH * 0.5f;
-    float switchPadRight = 6.0f;
+    float switchPadRight = 8.0f * ui_scale;
 
     ImVec2 sMin(curPos.x + availW - switchW - switchPadRight, curPos.y + (row_height - switchH) * 0.5f);
     ImVec2 sMax(sMin.x + switchW, sMin.y + switchH);
@@ -241,11 +252,11 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 36.0
 
     // Subtle dark track border when OFF
     if (!(*v)) {
-        dl->AddRect(sMin, sMax, IM_COL32(36, 56, 62, 220), switchRounding, 0, 1.0f);
+        dl->AddRect(sMin, sMax, IM_COL32(36, 56, 62, 220), switchRounding, 0, 1.2f);
     }
 
     // Circular white knob / thumb
-    float knobRadius = switchRounding - 2.5f;
+    float knobRadius = switchRounding - 2.8f * ui_scale;
     float knobX = *v ? (sMax.x - switchRounding) : (sMin.x + switchRounding);
     float knobY = sMin.y + switchRounding;
 
@@ -291,11 +302,11 @@ namespace ui::menu {
             pill_needs_reposition = true;
         }
 
-        // Dynamic responsive UI scaling
-        const float ui_scale = std::max(0.75f, std::min(realH / 1080.0f, 1.40f));
-        const float logoRadius = 40.0f * ui_scale;
+        // Dynamic responsive UI scaling (enlarged for modern mobile screens)
+        const float ui_scale = std::max(1.10f, std::min(realH / 1080.0f * 1.30f, 1.70f));
+        const float logoRadius = 46.0f * ui_scale;
         const float logoDiameter = logoRadius * 2.0f;
-        const float margin = 12.0f * ui_scale;
+        const float margin = 14.0f * ui_scale;
 
         static ImVec2 s_circle_pos = ImVec2(-1.0f, -1.0f);
         if (s_circle_pos.x < 0.0f || pill_needs_reposition) {
@@ -406,10 +417,10 @@ namespace ui::menu {
         }
 
         // ====================================================================
-        // CRACK MASTER MAIN WINDOW — MATCHING SCREENSHOT GEOMETRY
+        // CRACK MASTER MAIN WINDOW — ENLARGED TOUCH GEOMETRY
         // ====================================================================
-        const float winW = std::max(440.0f * ui_scale, std::min(560.0f * ui_scale, realW * 0.90f));
-        const float winH = std::max(340.0f * ui_scale, std::min(460.0f * ui_scale, realH * 0.90f));
+        const float winW = std::max(560.0f * ui_scale, std::min(720.0f * ui_scale, realW * 0.94f));
+        const float winH = std::max(440.0f * ui_scale, std::min(590.0f * ui_scale, realH * 0.94f));
 
         static ImVec2 s_menu_pos = ImVec2(-1.0f, -1.0f);
         if (s_menu_pos.x < 0.0f || menu_needs_reposition) {
@@ -448,11 +459,11 @@ namespace ui::menu {
         ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, ImVec4(0, 0, 0, 0));
 
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ui_opacity);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.2f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 8.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 5.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f * ui_scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.4f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * ui_scale, 10.0f * ui_scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f * ui_scale);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f * ui_scale);
         ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 0.0f);
 
         ImGuiWindowFlags winFlags = ImGuiWindowFlags_NoTitleBar |
@@ -468,18 +479,20 @@ namespace ui::menu {
             // ----------------------------------------------------------------
             // 1. TITLE BAR (CRACK MASTER in Neon Green + [ L ] and [ - ])
             // ----------------------------------------------------------------
-            const float headerH = 38.0f;
+            const float headerH = 48.0f * ui_scale;
             const char* brandTitle = "CRACK MASTER";
 
-            // Centered Header Title
-            ImVec2 titleSz = ImGui::CalcTextSize(brandTitle);
+            // Centered Header Title (Large & Prominent)
+            ImFont* font = ImGui::GetFont();
+            float titleFontSize = 23.0f * ui_scale;
+            ImVec2 titleSz = font->CalcTextSizeA(titleFontSize, FLT_MAX, 0.0f, brandTitle);
             float titleX = curWinPos.x + (curWinSize.x - titleSz.x) * 0.5f;
             float titleY = curWinPos.y + (headerH - titleSz.y) * 0.5f;
-            dl->AddText(ImVec2(titleX, titleY), theme_crackmaster::ColTitleGreen, brandTitle);
+            dl->AddText(font, titleFontSize, ImVec2(titleX, titleY), theme_crackmaster::ColTitleGreen, brandTitle);
 
             // Drag area across header (except right buttons)
-            const float btnSize = 24.0f;
-            const float rightButtonsWidth = btnSize * 2.0f + 16.0f;
+            const float btnSize = 32.0f * ui_scale;
+            const float rightButtonsWidth = btnSize * 2.0f + 20.0f * ui_scale;
             ImGui::SetCursorScreenPos(curWinPos);
             ImGui::InvisibleButton("##HeaderDragZone", ImVec2(curWinSize.x - rightButtonsWidth - 10.0f, headerH));
             if (ImGui::IsItemActive()) {
@@ -489,60 +502,65 @@ namespace ui::menu {
                 s_menu_pos.y = std::max(0.0f, std::min(s_menu_pos.y, realH - winH));
             }
 
-            // Top-right buttons: [ L ] and [ - ]
+            // Top-right buttons: [ L ] and [ - ] (Enlarged)
             float btnY = curWinPos.y + (headerH - btnSize) * 0.5f;
-            float btnMinusX = curWinPos.x + curWinSize.x - btnSize - 12.0f;
-            float btnLX     = btnMinusX - btnSize - 6.0f;
+            float btnMinusX = curWinPos.x + curWinSize.x - btnSize - 14.0f * ui_scale;
+            float btnLX     = btnMinusX - btnSize - 8.0f * ui_scale;
 
             // [ L ] Button
-            DrawHeaderSquareBtn("##TopBtnL", "L", ImVec2(btnLX, btnY), btnSize);
+            DrawHeaderSquareBtn("##TopBtnL", "L", ImVec2(btnLX, btnY), btnSize, ui_scale);
 
             // [ - ] Button (Minimize to floating pill)
-            if (DrawHeaderSquareBtn("##TopBtnMinus", "-", ImVec2(btnMinusX, btnY), btnSize)) {
+            if (DrawHeaderSquareBtn("##TopBtnMinus", "-", ImVec2(btnMinusX, btnY), btnSize, ui_scale)) {
                 menu_open = false;
             }
 
-            ImGui::SetCursorScreenPos(ImVec2(curWinPos.x + 12.0f, curWinPos.y + headerH));
+            ImGui::SetCursorScreenPos(ImVec2(curWinPos.x + 14.0f * ui_scale, curWinPos.y + headerH));
 
             // ----------------------------------------------------------------
             // 2. HORIZONTAL NAVIGATION TABS: [ Info ] [ Visual ] [ Aimbot ] [ Settings ]
             // ----------------------------------------------------------------
-            const float tabPadX = 12.0f;
-            const float tabGap  = 6.0f;
+            const float tabPadX = 14.0f * ui_scale;
+            const float tabGap  = 8.0f * ui_scale;
             const float tabW    = (curWinSize.x - tabPadX * 2.0f - tabGap * 3.0f) / 4.0f;
-            const float tabH    = 34.0f;
+            const float tabH    = 44.0f * ui_scale;
 
             const char* tabNames[] = { "Info", "Visual", "Aimbot", "Settings" };
 
             ImGui::SetCursorPos(ImVec2(tabPadX, headerH));
             for (int i = 0; i < 4; ++i) {
                 if (i > 0) ImGui::SameLine(0, tabGap);
-                if (DrawTopTabButton(tabNames[i], (activeTab == i), ImVec2(tabW, tabH))) {
+                if (DrawTopTabButton(tabNames[i], (activeTab == i), ImVec2(tabW, tabH), ui_scale)) {
                     activeTab = i;
                 }
             }
 
-            ImGui::Dummy(ImVec2(0, 10.0f));
+            ImGui::Dummy(ImVec2(0, 12.0f * ui_scale));
 
             // ----------------------------------------------------------------
             // 3. MAIN CONTENT BODY AREA
             // ----------------------------------------------------------------
             const float contentPadX = tabPadX;
-            const float contentY = headerH + tabH + 12.0f;
+            const float contentY = headerH + tabH + 14.0f * ui_scale;
             const float contentW = curWinSize.x - contentPadX * 2.0f;
-            const float contentH = curWinSize.y - contentY - 8.0f;
+            const float contentH = curWinSize.y - contentY - 8.0f * ui_scale;
 
             ImGui::SetCursorPos(ImVec2(contentPadX, contentY));
 
             if (ImGui::BeginChild("##CrackMasterContent", ImVec2(contentW, contentH), false, ImGuiWindowFlags_NoScrollbar)) {
                 ImDrawList* cdl = ImGui::GetWindowDrawList();
 
+                // Style scaling for sliders, combo dropdowns and option controls
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * ui_scale, 8.0f * ui_scale));
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f * ui_scale, 8.0f * ui_scale));
+                ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, 22.0f * ui_scale);
+
                 // ============================================================
                 // TAB 0: INFO
                 // ============================================================
                 if (activeTab == 0) {
-                    DrawSectionHeader(cdl, "Info");
-                    DrawSectionHeader(cdl, "System & Game Diagnostics");
+                    DrawSectionHeader(cdl, "Info", ui_scale);
+                    DrawSectionHeader(cdl, "System & Game Diagnostics", ui_scale);
 
                     ImGui::Text("Target PID: %d", static_cast<int>(proc::pid));
                     if (proc::lib) {
@@ -563,43 +581,43 @@ namespace ui::menu {
                 // ============================================================
                 else if (activeTab == 1) {
                     // 1. First Section Header: | Visual
-                    DrawSectionHeader(cdl, "Visual");
+                    DrawSectionHeader(cdl, "Visual", ui_scale);
 
                     // 2. Sub-Header: | ESP Display Elements
-                    DrawSectionHeader(cdl, "ESP Display Elements");
+                    DrawSectionHeader(cdl, "ESP Display Elements", ui_scale);
 
                     // 3. Toggle Switches with Capsule shape (Green ON, Dark Slate OFF)
-                    DrawToggleSwitch("Esp Box", &cfg::esp::box);
-                    DrawToggleSwitch("Esp Line", &cfg::esp::tracer);
-                    DrawToggleSwitch("Esp Name", &cfg::esp::name);
-                    DrawToggleSwitch("Esp Health", &cfg::esp::health);
-                    DrawToggleSwitch("Esp Distance", &cfg::esp::distance);
-                    DrawToggleSwitch("Esp Armor", &cfg::esp::armor);
-                    DrawToggleSwitch("Esp Weapon", &cfg::esp::weapon);
-                    DrawToggleSwitch("Esp Bot Tag", &cfg::esp::bot_tag);
-                    DrawToggleSwitch("Firing Indicator", &cfg::esp::firing_ind);
-                    DrawToggleSwitch("Crosshair", &cfg::esp::crosshair);
-                    DrawToggleSwitch("Loot Esp", &cfg::esp::loot);
+                    DrawToggleSwitch("Esp Box", &cfg::esp::box, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Line", &cfg::esp::tracer, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Name", &cfg::esp::name, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Health", &cfg::esp::health, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Distance", &cfg::esp::distance, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Armor", &cfg::esp::armor, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Weapon", &cfg::esp::weapon, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Bot Tag", &cfg::esp::bot_tag, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Firing Indicator", &cfg::esp::firing_ind, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Crosshair", &cfg::esp::crosshair, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Loot Esp", &cfg::esp::loot, 48.0f * ui_scale, ui_scale);
 
-                    ImGui::Dummy(ImVec2(0, 8.0f));
-                    DrawSectionHeader(cdl, "ESP Configuration");
+                    ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
+                    DrawSectionHeader(cdl, "ESP Configuration", ui_scale);
 
                     const char* boxTypes[] = { "Corner", "Full Chaturbhuj", "Glow" };
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##BoxStyle", &cfg::esp::box_type, boxTypes, 3);
                     ImGui::TextDisabled("Box Style Mode");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##MaxRange", &cfg::esp::max_range, 50.0f, 500.0f, "%.0f m");
                     ImGui::TextDisabled("Max Render Distance");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##LaserThickness", &cfg::esp::tracer_thickness, 0.5f, 4.0f, "%.1f px");
                     ImGui::TextDisabled("Laser Line Width");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##BoxThickness", &cfg::esp::box_thickness, 1.0f, 5.0f, "%.1f px");
                     ImGui::TextDisabled("Box Border Width");
@@ -610,42 +628,42 @@ namespace ui::menu {
                 // TAB 2: AIMBOT
                 // ============================================================
                 else if (activeTab == 2) {
-                    DrawSectionHeader(cdl, "Aimbot");
-                    DrawSectionHeader(cdl, "Aim Assist Controls");
+                    DrawSectionHeader(cdl, "Aimbot", ui_scale);
+                    DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
-                    DrawToggleSwitch("Aimbot Enable", &cfg::aim::enable);
-                    DrawToggleSwitch("Scope Aim (Head Lock)", &cfg::aim::scope_aim);
-                    DrawToggleSwitch("Sniper Headshot Lock", &cfg::aim::sniper_aim);
-                    DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov);
-                    DrawToggleSwitch("Ignore Knocked", &cfg::aim::ignore_knocked);
-                    DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots);
-                    DrawToggleSwitch("Check Visibility Only", &cfg::aim::visible_check);
+                    DrawToggleSwitch("Aimbot Enable", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Scope Aim (Head Lock)", &cfg::aim::scope_aim, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Sniper Headshot Lock", &cfg::aim::sniper_aim, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Ignore Knocked", &cfg::aim::ignore_knocked, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Check Visibility Only", &cfg::aim::visible_check, 48.0f * ui_scale, ui_scale);
 
-                    ImGui::Dummy(ImVec2(0, 8.0f));
-                    DrawSectionHeader(cdl, "FOV & Smooth Settings");
+                    ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
+                    DrawSectionHeader(cdl, "FOV & Smooth Settings", ui_scale);
 
                     const char* triggerModes[] = { "When Firing", "Always In FOV" };
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##AimTrigger", &cfg::aim::trigger_mode, triggerModes, 2);
                     ImGui::TextDisabled("Aim Trigger Condition");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* boneTargets[] = { "Head (Auto Drag)", "Neck / Upper Chest", "Pelvis / Body" };
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##AimBone", &cfg::aim::target_bone, boneTargets, 3);
                     ImGui::TextDisabled("Target Aim Bone");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##HeadshotRate", &cfg::aim::headshot_rate, 0.0f, 100.0f, "%.0f%%");
                     ImGui::TextDisabled("Headshot Rate (0%% - 100%%)");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##FovRadius", &cfg::aim::fov_radius, 30.0f, 650.0f, "%.0f px");
                     ImGui::TextDisabled("FOV Circle Radius");
 
-                    ImGui::Dummy(ImVec2(0, 4.0f));
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 1.0f, 25.0f, "%.1f");
                     ImGui::TextDisabled("Aim Smoothness");
@@ -656,19 +674,21 @@ namespace ui::menu {
                 // TAB 3: SETTINGS
                 // ============================================================
                 else if (activeTab == 3) {
-                    DrawSectionHeader(cdl, "Settings");
-                    DrawSectionHeader(cdl, "Menu Preferences");
+                    DrawSectionHeader(cdl, "Settings", ui_scale);
+                    DrawSectionHeader(cdl, "Menu Preferences", ui_scale);
 
                     ImGui::SliderFloat("##Opacity", &ui_opacity, 0.2f, 1.0f, "Opacity: %.2f");
                     ImGui::TextDisabled("Menu Window Opacity");
 
-                    ImGui::Dummy(ImVec2(0, 16.0f));
-                    if (ImGui::Button("SAFE EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 40.0f))) {
+                    ImGui::Dummy(ImVec2(0, 20.0f * ui_scale));
+                    if (ImGui::Button("SAFE EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 48.0f * ui_scale))) {
                         g_should_exit = true;
                     }
 
                     handleTouchScroll();
                 }
+
+                ImGui::PopStyleVar(3);
             }
             ImGui::EndChild();
         }
