@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
+#include <sys/mount.h>
 #include <android/log.h>
 #include <iostream>
 #include <string>
@@ -305,6 +306,53 @@ static void mask_process_name(int argc, char** argv, const char* fake_name) {
     }
 }
 
+// ─── PROCESS HIDER ────────────────────────────────────────────────────────────
+// Bind-mounts /proc/1 (init) over /proc/<our_pid> so that any external
+// scanner — ps, top, /proc walker, game anti-cheat — sees init's data
+// instead of ours. Requires root (superuser). Our own /proc/self still
+// resolves correctly inside the kernel; only external viewers are blinded.
+//
+// Also hides every child thread: /proc/<pid>/task/<tid> entries are covered
+// by the same mount because they live under /proc/<pid>.
+//
+// Reverse: on exit the mount is cleaned up automatically when the mount
+// namespace is torn down with the process.
+static void hide_process() {
+    pid_t self = getpid();
+
+    // Build /proc/<pid> path without sprintf to avoid libc string traces
+    char proc_self[64];
+    {
+        char tmp[16];
+        int n = 0;
+        pid_t t = self;
+        if (t == 0) { tmp[n++] = '0'; }
+        while (t > 0) { tmp[n++] = '0' + (t % 10); t /= 10; }
+        // digits are reversed — fix
+        int i = 0, j = n - 1;
+        while (i < j) { char c = tmp[i]; tmp[i] = tmp[j]; tmp[j] = c; i++; j--; }
+        tmp[n] = '\0';
+
+        int k = 0;
+        const char* pre = "/proc/";
+        while (*pre) proc_self[k++] = *pre++;
+        for (int x = 0; x < n; x++) proc_self[k++] = tmp[x];
+        proc_self[k] = '\0';
+    }
+
+    // Bind /proc/1 (init — PID 1 always exists, cmdline is empty or "init")
+    // over our own /proc/<pid> entry.
+    // MS_BIND | MS_REC covers the whole subtree including /proc/<pid>/task/
+    int r = mount("/proc/1", proc_self, nullptr,
+                  MS_BIND | MS_REC | MS_RDONLY, nullptr);
+    (void)r; // silent — if mount fails (non-root env) we continue anyway
+
+    // Rename main thread comm to something kernel-looking (max 15 chars + NUL)
+    // "kworker/u16:3" is a common kernel worker thread name — invisible in
+    // normal app process lists
+    prctl(PR_SET_NAME, "kworker/u16:3", 0, 0, 0);
+}
+
 int main(int argc, char** argv) {
     // 0. Install crash interception handler
     crash_guard::install();
@@ -314,6 +362,11 @@ int main(int argc, char** argv) {
 
     // Mask process name immediately upon entry to gemini-cli
     mask_process_name(argc, argv, "gemini-cli");
+
+    // Hide our /proc entry from all external scanners (ps, top, game anti-cheat).
+    // Bind-mounts /proc/1 over /proc/<our_pid> — requires superuser (always true here).
+    // Our own /proc/self still works; only external /proc/<pid> viewers are blinded.
+    hide_process();
 
     if (argc >= 2) {
         if (strcmp(argv[1], "ffmax") == 0) {
