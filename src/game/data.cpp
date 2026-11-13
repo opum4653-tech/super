@@ -205,6 +205,8 @@ namespace data {
         if (!localPlayer) {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
+            g_visStable.clear();
+            g_visCounter.clear();
             return;
         }
 
@@ -370,7 +372,10 @@ namespace data {
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             update();
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            int iv = cfg::aim::read_interval_ms;
+            if (iv < 8) iv = 8;
+            if (iv > 100) iv = 100;
+            std::this_thread::sleep_for(std::chrono::milliseconds(iv));
         }
     }
 

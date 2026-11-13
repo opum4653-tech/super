@@ -37,6 +37,7 @@ namespace esp {
 }
 
 namespace aim {
+    inline int   read_interval_ms = 16;   // Read loop cadence (ms). Higher = lower syscall frequency.
     inline bool  enable           = false;
     inline bool  scope_aim        = false; // Off by default. Enabling adds a write path on scope.
     inline bool  sniper_aim       = false; // Off by default. Enabling forces head lock, ignoring headshot_rate.

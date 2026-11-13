@@ -12,6 +12,8 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
+#include <unistd.h>
 
 extern float g_sw;
 extern float g_sh;
