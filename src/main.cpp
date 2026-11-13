@@ -76,8 +76,10 @@ static bool check_license_gate(int argc, char** argv) {
     }
 
     if (!key_ok || !lic::is_valid()) {
-        printf("[-] Authentication failed: Invalid or expired API token.\n");
-        fflush(stdout);
+        if (strlen(key_input) == 0) {
+            printf("[-] Authentication failed: License key is required.\n");
+            fflush(stdout);
+        }
         return false;
     }
 
