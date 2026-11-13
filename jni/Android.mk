@@ -82,6 +82,7 @@ LOCAL_C_INCLUDES := \
     $(LOCAL_PATH)/../src/ui/styles \
     $(LOCAL_PATH)/../src/ui/widgets \
     $(LOCAL_PATH)/../src/func \
+    $(LOCAL_PATH)/../src/func/esp \
     $(LOCAL_PATH)/../src/game \
     $(LOCAL_PATH)/../src/other \
     $(LOCAL_PATH)/../src/protect \

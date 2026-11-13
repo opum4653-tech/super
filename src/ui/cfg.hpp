@@ -53,7 +53,7 @@ namespace aim {
 }
 
 inline bool any_feature_enabled() {
-    return aim::enable || esp::line || esp::box || esp::health ||
+    return aim::enable || esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair;
 }

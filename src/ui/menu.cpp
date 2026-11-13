@@ -609,10 +609,10 @@ namespace ui::menu {
                     ImGui::TextDisabled("Box Style Mode");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    const char* linePositions[] = { "Top of Screen", "Center (Crosshair)", "Bottom of Screen" };
+                    const char* linePositions[] = { "Screen Top (Original)", "Screen Center (Crosshair Dot)", "Screen Bottom" };
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##LinePos", &cfg::esp::tracer_pos, linePositions, 3);
-                    ImGui::TextDisabled("Tracer Line Start Position");
+                    ImGui::TextDisabled("Tracer Line Origin");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
