@@ -317,28 +317,31 @@ namespace aimbot {
                         s_smoothDir.z += (shotDir.z - s_smoothDir.z) * lerpT;
                         s_smoothDir = SafeNormalize(s_smoothDir);
 
+                        // ── NATURAL AIM DIRECTION (CAMERA-COMPLIANT WRITE) ───────────
                         wpm<Vector3>(dirAddr, s_smoothDir);
                         wpm<bool>(aimInfo + 0x71, false);
 
-                        if (lockToHead) {
-                            uint64_t headCollider = rpm<uint64_t>(bestEnemy->addr + Offsets::Player::HeadCollider);
-                            if (is_valid_ptr(headCollider)) {
-                                wpm<uint64_t>(bestEnemy->addr + Offsets::Player::ColWrite, headCollider);
-                            }
-                        }
+                        // NOTE [CRITICAL ANTI-BLACKLIST FIX]:
+                        // NEVER write to enemy memory (ColWrite / HeadCollider)!
+                        // Overwriting enemy hitbox pointers triggers instant server-side collision
+                        // audit mismatches and places accounts in blacklist matchmaking.
+                        // We achieve natural aim connection strictly via client trajectory (dirAddr).
+                        (void)lockToHead;
 
-                        // ── SAFE PARTIAL RECOIL REDUCTION (not zeroing — reduces signature) ──
-                        // Reads current recoil and writes it back multiplied by 0.12f.
-                        // Result: ~88% reduction per frame → spray still rises slightly
-                        // but stays on target. No constant-zero pattern.
+                        // ── SAFE RANDOMIZED RECOIL MICRO-VARIATION ────────────────────
+                        // Never zero or lock flat. Mimics physical barrel dynamics with subtle variance.
                         uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player::Weapon);
                         if (is_valid_ptr(weapon)) {
                             uint64_t wdata = rpm<uint64_t>(weapon + Offsets::Weapon::Data);
                             if (is_valid_ptr(wdata)) {
                                 float currentRecoil = rpm<float>(wdata + Offsets::Weapon::Recoil);
-                                if (std::isfinite(currentRecoil) && currentRecoil > 0.001f) {
-                                    // Dampen to 12% — functionally near-zero but not a flat 0.0f
-                                    wpm<float>(wdata + Offsets::Weapon::Recoil, currentRecoil * 0.12f);
+                                if (std::isfinite(currentRecoil) && currentRecoil > 0.05f) {
+                                    // Soft reduction with natural drift (15% - 25% retention)
+                                    static uint32_t s_recoilRnd = 0x89AB;
+                                    s_recoilRnd ^= s_recoilRnd << 13;
+                                    s_recoilRnd ^= s_recoilRnd >> 17;
+                                    float variance = 0.16f + ((s_recoilRnd % 10) * 0.01f);
+                                    wpm<float>(wdata + Offsets::Weapon::Recoil, currentRecoil * variance);
                                 }
                             }
                         }
