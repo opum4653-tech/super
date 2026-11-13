@@ -403,19 +403,32 @@ namespace func::esp {
                 // Strictly draw tracer ONLY when head point is within visible screen bounds
                 if (p.Head.x >= 0.f && p.Head.x <= g_sw &&
                     p.Head.y >= 0.f && p.Head.y <= g_sh) {
+                    ImVec2 lineStart;
+                    if (cfg::esp::tracer_pos == 1) {
+                        lineStart = ImVec2(g_sw * 0.5f, g_sh * 0.5f); // Screen Center / Crosshair
+                    } else if (cfg::esp::tracer_pos == 2) {
+                        lineStart = ImVec2(g_sw * 0.5f, g_sh);        // Screen Bottom
+                    } else {
+                        lineStart = ImVec2(g_sw * 0.5f, 0.f);         // Screen Top
+                    }
+
                     ImVec2 head(p.Head.x, p.Head.y);
                     float aa = ImClamp(1.f - p.distance / cfg::esp::max_range, 0.25f, 1.f);
                     float tThick = cfg::esp::tracer_thickness;
                     // Sleek dynamic laser line with soft glow
-                    dl->AddLine(anchor, head,
+                    dl->AddLine(lineStart, head,
                         withAlpha(toU32(cfg::esp::box_col), 0.25f * aa), tThick + 1.4f);
-                    dl->AddLine(anchor, head,
+                    dl->AddLine(lineStart, head,
                         withAlpha(toU32(cfg::esp::box_col), 0.95f * aa), tThick);
                 }
             }
 
-            if (cfg::esp::box)
+            if (cfg::esp::box) {
+                if (cfg::esp::box_filled) {
+                    dl->AddRectFilled(tl, br, withAlpha(colBase, 0.15f), cfg::esp::box_rounding);
+                }
                 drawBox(dl, tl, br, colBase, cfg::esp::box_type);
+            }
 
             if (cfg::esp::firing_ind)
                 drawFiring(dl, p, cx, tl.y);

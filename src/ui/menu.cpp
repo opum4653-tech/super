@@ -588,6 +588,7 @@ namespace ui::menu {
 
                     // 3. Toggle Switches with Capsule shape (Green ON, Dark Slate OFF)
                     DrawToggleSwitch("Esp Box", &cfg::esp::box, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Esp Box Filled", &cfg::esp::box_filled, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Esp Line", &cfg::esp::tracer, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Esp Name", &cfg::esp::name, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Esp Health", &cfg::esp::health, 48.0f * ui_scale, ui_scale);
@@ -606,6 +607,12 @@ namespace ui::menu {
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##BoxStyle", &cfg::esp::box_type, boxTypes, 3);
                     ImGui::TextDisabled("Box Style Mode");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    const char* linePositions[] = { "Top of Screen", "Center (Crosshair)", "Bottom of Screen" };
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::Combo("##LinePos", &cfg::esp::tracer_pos, linePositions, 3);
+                    ImGui::TextDisabled("Tracer Line Start Position");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);

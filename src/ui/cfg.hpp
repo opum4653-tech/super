@@ -14,6 +14,8 @@ namespace esp {
     inline bool  bot_tag          = false;
     inline bool  ignore_bots      = false;
     inline bool  tracer           = false;
+    inline int   tracer_pos       = 0; // 0 = Top, 1 = Center / Crosshair, 2 = Bottom (from STORM_MODS)
+    inline bool  box_filled       = false; // Subtle filled background box (from STORM_MODS)
     inline bool  crosshair        = false;
     inline bool  firing_ind       = false;
     inline bool  loot             = false;
