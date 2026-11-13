@@ -13,9 +13,7 @@ namespace display_safe {
     // Results are cached in RAM so calling from the 60fps render loop is instant.
     SafeDisplayInfo get_info(bool force_refresh = false);
 
-    // Explicitly update orientation if device rotates
+    // Explicitly update orientation if device rotates. Fed by the render loop,
+    // which reads it off the display binder — never by forking a shell.
     void update_orientation(uint32_t rot);
-
-    // Queries current dynamic SurfaceOrientation from Android display subsystem
-    uint32_t probe_orientation();
 }

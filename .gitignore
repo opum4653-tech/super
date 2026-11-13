@@ -4,3 +4,13 @@ obj/
 *.o
 *.d
 *.bak
+
+# Local-only configuration and art — never commit
+api_config.json
+logo.jpg
+
+# Anything the binary might drop at runtime
+ninmods.log
+license.dat
+.nin_license.dat
+.nin_hwid

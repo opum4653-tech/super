@@ -1,6 +1,7 @@
 #include "Android_draw/draw.h"
 #include "Font.h"
-#include "other/logger.hpp"
+#include "other/display_manager.hpp"
+#include <chrono>
 #include <dlfcn.h>
 
 typedef void (*pfn_ANW_acquire)(ANativeWindow*);
@@ -51,7 +52,7 @@ bool initGUI_draw(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
     #else
         InitVulkan();
         SetupVulkan();
-        ::native_window = android::ANativeWindowCreator::Create("AImGui", _screen_x, _screen_y, false, false);
+        ::native_window = android::ANativeWindowCreator::Create("SurfaceView", _screen_x, _screen_y, false, false);
         SetupVulkanWindow(::native_window, (int) _screen_x, (int) _screen_y);
     #endif
     if (!ImGui_init()) {
@@ -66,7 +67,7 @@ bool initGUI_draw(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
 }
 
 bool init_egl(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
-    ::native_window = android::ANativeWindowCreator::Create("AImGui", _screen_x, _screen_y, false, false);
+    ::native_window = android::ANativeWindowCreator::Create("SurfaceView", _screen_x, _screen_y, false, false);
     if (!::native_window) {
         printf("[-] Failed to create native surface window (SurfaceComposer returned null)\n");
         fflush(stdout);
@@ -149,6 +150,17 @@ bool init_egl(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
 }
 
 void screen_config() {
+    // GetDisplayInfo() is a binder round-trip into SurfaceFlinger. Calling it at
+    // frame rate is a standing 60 Hz signal, so it is throttled to twice a second.
+    // Orientation changes are far slower than that, so nothing is lost.
+    static auto s_last_probe = std::chrono::steady_clock::time_point{};
+    auto now = std::chrono::steady_clock::now();
+    if (s_last_probe.time_since_epoch().count() != 0 &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - s_last_probe).count() < 500) {
+        return;
+    }
+    s_last_probe = now;
+
     displayInfo = android::ANativeWindowCreator::GetDisplayInfo();
     if (displayInfo.width <= 0) displayInfo.width = 1080;
     if (displayInfo.height <= 0) displayInfo.height = 2400;
@@ -195,10 +207,9 @@ bool ImGui_init() {
 void drawBegin() {
     screen_config();
     if (::orientation != displayInfo.orientation) {
-        LOG_INFO("Display orientation transition detected: %u -> %u (Dims: %dx%d)",
-                 ::orientation, displayInfo.orientation, displayInfo.width, displayInfo.height);
         ::orientation = displayInfo.orientation;
         UpdateScreenData(displayInfo.width, displayInfo.height, displayInfo.orientation);
+        display_safe::update_orientation(displayInfo.orientation);
     }
     
     #ifdef USE_OPENGL

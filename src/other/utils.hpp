@@ -41,4 +41,44 @@ public:
         if (!key) return 0;
         return rpm<uint64_t>(entries_head + i * 0x18 + 0x10);
     }
+
+    // The entries array is contiguous, so a run of them is one read instead of
+    // three per slot. 64 entries is 0x600 bytes — one syscall, small enough to
+    // never straddle an unmapped page of the backing array.
+    static constexpr int kBlockSize = 64;
+
+    struct EntryBlock {
+        uint64_t value[kBlockSize];   // 0 when the slot is empty or invalid
+        int      count;               // entries actually filled from this block
+    };
+
+    inline bool read_block(int start, EntryBlock& out) const {
+        out.count = 0;
+        if (!valid || start < 0 || start >= count) return false;
+
+        int n = count - start;
+        if (n > kBlockSize) n = kBlockSize;
+
+        // Slot layout: +0x00 hashCode(int32), +0x08 key, +0x10 value
+        struct Raw {
+            int32_t  hash;
+            int32_t  pad;
+            uint64_t key;
+            uint64_t value;
+        };
+        static_assert(sizeof(Raw) == 0x18, "dictionary entry must be 0x18 bytes");
+
+        Raw raw[kBlockSize];
+        if (!mem_read(entries_head + static_cast<uint64_t>(start) * 0x18,
+                      raw, static_cast<size_t>(n) * 0x18)) {
+            return false;
+        }
+
+        for (int i = 0; i < n; i++) {
+            // Same acceptance rule as entry(): reject empty slots and dead keys.
+            out.value[i] = (raw[i].hash < 0 || raw[i].key == 0) ? 0 : raw[i].value;
+        }
+        out.count = n;
+        return true;
+    }
 };

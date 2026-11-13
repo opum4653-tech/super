@@ -36,27 +36,18 @@ namespace esp {
     inline ImVec4 weapon_col      = ImVec4(1.0f, 0.85f, 0.30f, 1.0f);
 }
 
-namespace combat {
-    inline bool auto_target_closest = false;
-    inline bool prioritize_low_hp   = false;
-    inline bool filter_invisible    = false;
-}
-
 namespace aim {
     inline bool  enable           = false;
-    inline bool  scope_aim        = true;  // Scoping Headshot: Locks directly to head when scoping
-    inline bool  sniper_aim       = true;  // Sniper Headshot Mode: Auto-locks skull on scope/hold-fire
+    inline bool  scope_aim        = false; // Off by default. Enabling adds a write path on scope.
+    inline bool  sniper_aim       = false; // Off by default. Enabling forces head lock, ignoring headshot_rate.
     inline bool  show_fov         = false;
     inline float fov_radius       = 180.0f;
     inline float smooth           = 5.0f;   // Safe default: smooth lerp (1=snap, 10=slow). Range 3-8 looks natural.
-    inline float headshot_rate    = 100.0f; // 0% to 100% (Adjustable headshot connection rate)
+    inline float headshot_rate    = 0.0f;   // 0% default = no head targeting until raised in menu.
     inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
-    inline bool  ignore_knocked   = false;
     inline bool  ignore_bots      = false;
-    inline bool  visible_check    = false;
     inline float max_distance     = 200.0f;
-    inline bool  prediction       = false;
 }
 }

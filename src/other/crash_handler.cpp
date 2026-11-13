@@ -4,35 +4,49 @@
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
-#include <android/log.h>
 
-static void safe_sig_handler(int sig, siginfo_t* info, void* context) {
-    const char* sig_name = "UNKNOWN";
-    if (sig == SIGSEGV) sig_name = "SIGSEGV (Invalid Memory Access / Null Pointer)";
-    else if (sig == SIGBUS) sig_name = "SIGBUS (Alignment / Unmapped Memory Fault)";
-    else if (sig == SIGFPE) sig_name = "SIGFPE (Arithmetic Exception)";
-    else if (sig == SIGILL) sig_name = "SIGILL (Illegal Instruction)";
-    else if (sig == SIGABRT) sig_name = "SIGABRT (Abort Signal)";
+// Registered teardown. Runs before the process leaves, from both the fatal path
+// and the termination path, so anything the process changed is put back.
+static void (*s_cleanup)() = nullptr;
 
-    void* fault_addr = info ? info->si_addr : nullptr;
+static void run_cleanup() {
+    if (!s_cleanup) return;
+    static volatile sig_atomic_t s_running = 0;
+    if (s_running) return;          // signal arrived while already tearing down
+    s_running = 1;
+    s_cleanup();
+    s_running = 0;
+}
 
-    fprintf(stderr, "\n=======================================================\n");
-    fprintf(stderr, "[-] CRASH INTERCEPTED BY CRASH_GUARD!\n");
-    fprintf(stderr, "[-] Signal : %s (%d)\n", sig_name, sig);
-    fprintf(stderr, "[-] Address: %p\n", fault_addr);
-    fprintf(stderr, "[-] Intercepted safely. Halting process cleanly.\n");
-    fprintf(stderr, "=======================================================\n\n");
+// Fatal fault: one neutral line on stderr, no logcat, no banner, no description
+// of what failed. debuggerd never sees the signal because it is caught here, so
+// no tombstone is produced either.
+static void fatal_handler(int sig, siginfo_t* info, void* context) {
+    (void)info;
+    (void)context;
+
+    fprintf(stderr, "[-] native fault (%d)\n", sig);
     fflush(stderr);
 
-    __android_log_print(ANDROID_LOG_FATAL, "CrashGuard", "[-] Intercepted fatal signal %d (%s) at %p", sig, sig_name, fault_addr);
+    run_cleanup();
+    _exit(0);                       // exit 0 keeps the terminal free of signal reports
+}
 
-    // Clean exit to prevent terminal error 139 / Segmentation fault notice
-    _exit(0);
+// SIGTERM / SIGINT / SIGHUP: restore state and leave. No output at all — a
+// termination signal should not leave a trail behind it.
+static void term_handler(int sig) {
+    run_cleanup();
+    _exit(128 + sig);
 }
 
 namespace crash_guard {
+
+    void set_cleanup(void (*fn)()) {
+        s_cleanup = fn;
+    }
+
     void install() {
-        // Allocate dedicated alternate signal stack so stack overflows can be caught safely
+        // Dedicated alternate signal stack so stack overflows are caught too.
         static uint8_t s_alt_stack[SIGSTKSZ * 4];
         stack_t ss{};
         memset(&ss, 0, sizeof(ss));
@@ -45,12 +59,24 @@ namespace crash_guard {
         memset(&sa, 0, sizeof(sa));
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
-        sa.sa_sigaction = safe_sig_handler;
+        sa.sa_sigaction = fatal_handler;
 
         sigaction(SIGSEGV, &sa, nullptr);
-        sigaction(SIGBUS, &sa, nullptr);
-        sigaction(SIGFPE, &sa, nullptr);
-        sigaction(SIGILL, &sa, nullptr);
+        sigaction(SIGBUS,  &sa, nullptr);
+        sigaction(SIGFPE,  &sa, nullptr);
+        sigaction(SIGILL,  &sa, nullptr);
         sigaction(SIGABRT, &sa, nullptr);
+
+        // Termination signals: plain handler, no SA_SIGINFO needed.
+        struct sigaction ta;
+        memset(&ta, 0, sizeof(ta));
+        sigemptyset(&ta.sa_mask);
+        ta.sa_flags = SA_RESTART;
+        ta.sa_handler = term_handler;
+
+        sigaction(SIGTERM, &ta, nullptr);
+        sigaction(SIGINT,  &ta, nullptr);
+        sigaction(SIGHUP,  &ta, nullptr);
     }
+
 }

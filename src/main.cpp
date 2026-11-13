@@ -5,101 +5,28 @@
 #include "other/memory.hpp"
 #include "other/crash_handler.hpp"
 #include "other/display_manager.hpp"
-#include "other/logger.hpp"
+#include "other/settings_guard.hpp"
 #include "game/data.hpp"
 #include "game/Offsets.h"
 #include "func/esp.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
-#include <cctype>
-#include <ctime>
 #include <thread>
 #include <chrono>
 #include <unistd.h>
-#include <sys/wait.h>
 #include <sys/prctl.h>
-#include <android/log.h>
-#include <iostream>
 #include <string>
 #include <atomic>
-
-#define LOG_TAG "gemini"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
-
-// ANSI COLOR
-#define RST        "\033[0m"
-#define BOLD       "\033[1m"
-#define FG_BRED    "\033[91m"
-#define FG_BGREEN  "\033[92m"
-#define FG_BYELLOW "\033[93m"
-#define FG_BBLUE   "\033[94m"
-#define FG_BCYAN   "\033[96m"
-#define FG_BWHITE  "\033[97m"
 
 extern float global_anim_time;
 std::atomic<bool> main_thread_flag{true};
 
-// TARGET GAME
-enum TargetGame {
-    GAME_FF     = 0,
-    GAME_FF_MAX = 1
-};
-
-static TargetGame g_targetGame = GAME_FF;
-
-static const char* kFFActivity    = "com.dts.freefireth/com.dts.freefireth.FFMainActivity";
-static const char* kFFMaxActivity = "com.dts.freefiremax/com.dts.freefiremax.FFMainActivity";
-static const char* kFFPackage     = "com.dts.freefireth";
-static const char* kFFMaxPackage  = "com.dts.freefiremax";
-
-static const char* GetTargetActivity() {
-    return (g_targetGame == GAME_FF) ? kFFActivity : kFFMaxActivity;
-}
-static const char* GetTargetPackage() {
-    return (g_targetGame == GAME_FF) ? kFFPackage : kFFMaxPackage;
-}
-
-// WAIT FOR GAME (DAEMON TASK SYNC)
-static int wait_for_game() {
-    printf("[*] Synchronizing runtime context with target subsystem...\n");
-    fflush(stdout);
-
-    while (true) {
-        proc::pid = get_pid();
-        if (proc::pid > 0) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(800));
-    }
-    printf("[+] Context bound (Task PID: %d)\n", proc::pid);
-    fflush(stdout);
-    return proc::pid;
-}
-
-// GEMINI CLI DASHBOARD & INITIALIZATION GATE
-static void print_dashboard() {
-    time_t exp = lic::expiry_date();
-    struct tm* tm_info = (exp > 0) ? gmtime(&exp) : nullptr;
-    char exp_buf[64] = {0};
-    if (tm_info) {
-        strftime(exp_buf, sizeof(exp_buf), "%Y-%m-%d %H:%M:%S UTC", tm_info);
-    } else {
-        snprintf(exp_buf, sizeof(exp_buf), "Active / Dynamic Subscription");
-    }
-
-    printf("Google Gemini Developer API CLI v1.5.0\n");
-    printf("Environment    : Linux aarch64 (Embedded Core Engine)\n");
-    printf("API Key Status : Valid / Active (%s)\n", lic::status_text());
-    printf("Token Expiry   : %s\n", exp_buf);
-    printf("Runtime Status : Ready | Daemon Task Attached\n\n");
-    fflush(stdout);
-}
+// Defined next to mask_process_name below; used by the render-loop heartbeat.
+static bool self_is_traced();
 
 static bool check_license_gate(int argc, char** argv) {
     lic::init();
-
-    printf("Google Gemini Core Engine — Authentication\n");
-    printf("API Key is required to initialize runtime pipeline.\n");
-    fflush(stdout);
 
     // 1. Command-line argument key (standalone launch: sh gemini-cli.sh <KEY>)
     //    Only used in TTY mode (adb/termux), not from the launcher app.
@@ -109,11 +36,6 @@ static bool check_license_gate(int argc, char** argv) {
                 && strcmp(argv[i], "ffmax") != 0
                 && strcmp(argv[i], "START") != 0) {
                 if (lic::set_key(argv[i]) && lic::is_valid()) {
-                    printf("[+] Pre-authorized via CLI argument.\n");
-                    printf("[+] API Key validated successfully. Core engine authorized.\n");
-                    printf("[+] Interactive terminal detected (MT Manager / Termux).\n");
-                    printf("[+] Loading overlay engine into RAM immediately...\n\n");
-                    fflush(stdout);
                     return true;
                 }
             }
@@ -121,7 +43,9 @@ static bool check_license_gate(int argc, char** argv) {
     }
 
     // 2. Interactive stdin prompt — always reached when piped from launcher app.
-    //    Emit "[?] Enter API Access Key:" so the app knows to open the license dialog.
+    //    The token below is a handshake, not a log line: the launcher watches
+    //    stdout for it to open the key dialog. It is the only byte this process
+    //    writes to a stream. No banner, no status, no result text.
     printf("[?] Enter API Access Key: ");
     fflush(stdout);
 
@@ -148,50 +72,33 @@ static bool check_license_gate(int argc, char** argv) {
         }
         if (strlen(key_input) > 0) {
             key_ok = lic::set_key(key_input);
-        } else if (lic::is_valid()) {
-            key_ok = true;
         }
     }
 
     if (!key_ok || !lic::is_valid()) {
-        printf("[-] Authentication failed: Invalid or expired API token.\n");
-        fflush(stdout);
         return false;
     }
 
-    printf("[+] API Key validated successfully. Core engine authorized.\n");
-    fflush(stdout);
-
     // 3. TTY path — load immediately without waiting for START
     if (isatty(fileno(stdin))) {
-        printf("[+] Interactive terminal detected (MT Manager / Termux).\n");
-        printf("[+] Loading overlay engine into RAM immediately...\n\n");
-        fflush(stdout);
         return true;
     }
 
     // 4. Piped from launcher app — wait for START signal
-    printf("[?] Ready to load into memory. Awaiting START signal...\n");
-    fflush(stdout);
-
     char start_input[64] = {0};
     if (fgets(start_input, sizeof(start_input), stdin)) {
         // Unblocked by Start button tap from app
     }
 
-    printf("[+] Loading overlay engine into RAM...\n\n");
-    fflush(stdout);
     return true;
 }
 
 // START OVERLAY
 static int start_overlay() {
-    LOGI("=== ninmods starting ===");
-    printf("[*] Probing display dimensions and screen orientation...\n");
-    fflush(stdout);
-
-    display_safe::probe_orientation();
+    // screen_config() pulls orientation from the binder; push it into the display
+    // cache instead of spawning a shell to ask SurfaceFlinger the same thing.
     screen_config();
+    display_safe::update_orientation(displayInfo.orientation);
 
     int max_size = (displayInfo.height > displayInfo.width)
                    ? displayInfo.height : displayInfo.width;
@@ -207,19 +114,12 @@ static int start_overlay() {
     printf("[*] Configuring Android system touch security policies...\n");
     fflush(stdout);
 
-    system("settings put global block_untrusted_touches 0 2>/dev/null; settings put system block_untrusted_touches 0 2>/dev/null");
-
-    printf("[*] Creating SurfaceComposerClient Native Window and initializing EGL...\n");
-    fflush(stdout);
+    settings_guard::capture_and_relax();
 
     if (!initGUI_draw(native_window_screen_x, native_window_screen_y, true, false)) {
-        printf("[-] Failed to initialize overlay GUI (NativeWindow or EGL error)\n");
-        fflush(stdout);
+        settings_guard::restore();      // captured before init — put it back on this path too
         return -1;
     }
-    printf("[+] Floating overlay engine initialized successfully!\n");
-    printf("[*] Attaching Linux input touch listener...\n");
-    fflush(stdout);
 
     Touch_Init(displayInfo.width, displayInfo.height, displayInfo.orientation, true);
 
@@ -227,9 +127,7 @@ static int start_overlay() {
     // Allows overlay GUI & floating logo to appear immediately upon launching,
     // without blocking for game launch.
     std::thread attach_worker([]() {
-        LOG_INFO("Target attach daemon thread launched. Polling game process and screen orientation.");
         while (main_thread_flag) {
-            display_safe::probe_orientation();
             proc::pid = get_pid();
             if (proc::pid > 0) {
                 proc::lib = get_lib();
@@ -238,21 +136,15 @@ static int start_overlay() {
                     uint32_t elfMagic = rpm<uint32_t>(proc::lib);
                     if (elfMagic == 0x464C457F) {
                         data::thread_start();
-                        LOG_INFO("Runtime subsystem attached (PID: %d, Lib: 0x%lx)", proc::pid, (unsigned long)proc::lib);
-                        printf("[+] Runtime subsystem attached (PID: %d, Lib: 0x%lx)\n", proc::pid, (unsigned long)proc::lib);
-                        fflush(stdout);
 
-                        // Monitor target lifecycle and dynamic orientation during active gameplay
+                        // Monitor target lifecycle during active gameplay.
+                        // Orientation is tracked by the render loop, which already
+                        // sees every transition; nothing to poll for here.
                         while (main_thread_flag) {
                             if (get_pid() <= 0) {
                                 data::thread_stop();
-                                LOG_INFO("Session detached (PID exited). Waiting for reconnect...");
-                                printf("[*] Session detached. Waiting for reconnect...\n");
-                                fflush(stdout);
                                 break;
                             }
-                            // Keep tracking orientation while attached to ensure touch matrix matches screen rotation
-                            display_safe::probe_orientation();
                             std::this_thread::sleep_for(std::chrono::milliseconds(500));
                         }
                     }
@@ -262,9 +154,6 @@ static int start_overlay() {
         }
     });
     attach_worker.detach();
-
-    printf("[+] Gemini CLI runtime daemon active. Processing stream.\n\n");
-    fflush(stdout);
 
     //  MAIN LOOP — RENDER LOOP (MINIMAL LOGGING)
     int dbgCounter = 0;
@@ -278,15 +167,23 @@ static int start_overlay() {
 // PERIODIC DAEMON HEARTBEAT (EVERY ~5 SECONDS)
         if (++dbgCounter >= 300) {
             dbgCounter = 0;
-            bool inM = data::inMatch.load(std::memory_order_relaxed);
-            printf("[gemini-cli] daemon status: %s | stream objects: active\n", inM ? "processing" : "idle");
-            fflush(stdout);
+
+            // Re-read TracerPid, then re-assert the seal. If something attached
+            // mid-session, drop out of the loop — the teardown below still runs,
+            // so the settings write is put back.
+            bool traced = self_is_traced();
+            prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+            if (traced) {
+                main_thread_flag = false;
+                break;
+            }
         }
     }
 
     shutdown();
     Touch_Close();
     data::thread_stop();
+    settings_guard::restore();
     return 0;
 }
 
@@ -305,9 +202,30 @@ static void mask_process_name(int argc, char** argv, const char* fake_name) {
     }
 }
 
+// True when a debugger is attached to this process. One openat + one read of
+// our own /proc/self/status, parsed in a stack buffer, descriptor closed on
+// every path — nothing opened stays open, nothing hits storage.
+static bool self_is_traced() {
+    int fd = sys::openat(AT_FDCWD, oxorany("/proc/self/status"), O_RDONLY);
+    if (fd < 0) return false;
+
+    char buf[1024];
+    long n = sys::read(fd, buf, sizeof(buf) - 1);
+    sys::close(fd);
+    if (n <= 0) return false;
+    buf[n] = '\0';
+
+    const char* p = strstr(buf, oxorany("TracerPid:"));
+    if (!p) return false;
+    p += 9;
+    while (*p == ' ' || *p == '\t') p++;
+    return atoi(p) != 0;
+}
+
 int main(int argc, char** argv) {
     // 0. Install crash interception handler
     crash_guard::install();
+    crash_guard::set_cleanup(settings_guard::restore);
 
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -315,11 +233,15 @@ int main(int argc, char** argv) {
     // Mask process name immediately upon entry to gemini-cli
     mask_process_name(argc, argv, "gemini-cli");
 
-    if (argc >= 2) {
-        if (strcmp(argv[1], "ffmax") == 0) {
-            g_targetGame = GAME_FF_MAX;
-        }
+    // The process runs privileged, so nothing else gets to look inside it.
+    // Read TracerPid first (while our own /proc entries are still ours), then
+    // seal: PR_SET_DUMPABLE 0 removes the core-dump path, denies ptrace, and
+    // makes /proc/<pid>/{mem,maps,fd,environ,cmdline,status} root-owned instead
+    // of ours — an ordinary process opens them and gets EACCES.
+    if (self_is_traced()) {
+        return 1;                   // attached before we even started: leave quietly
     }
+    prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
 
     if (!check_license_gate(argc, argv)) {
         return 1;

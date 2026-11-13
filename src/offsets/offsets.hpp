@@ -7,9 +7,11 @@
 
 namespace Offsets {
 
-// Target Game Build Metadata
-    constexpr const char* GameVersion   = "OB55 / 1.132.1";
-    constexpr const char* TargetPackage = "com.dts.freefireth";
+// Target game build these positions were read from: OB55 / 1.132.1.
+// Keep this comment in sync with the file whenever a value is refreshed —
+// it is the only record of which build the numbers came from.
+// (The package name deliberately does not live here as a literal; the process
+//  matcher in src/other/memory.hpp carries it obfuscated.)
 
 // Base Chain (GameFacade → BaseGame → Match)
     namespace Base {

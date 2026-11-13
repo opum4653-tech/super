@@ -16,13 +16,16 @@
 extern float g_sw;
 extern float g_sh;
 
-// SAFE BODY-TO-HEAD RECOIL DRAG ENGINE (NATURAL GAMEPLAY — ZERO CAMERA JUMPING)
+// TRAJECTORY ASSIST ENGINE (NATURAL GAMEPLAY — ZERO CAMERA JUMPING)
 // Features:
 // 1. Natural Gameplay: Camera rotation is 100% untouched. Finger aiming is free.
 // 2. Strict Target Stickiness & Hysteresis: ZERO screen shaking when multiple enemies enter FOV.
 // 3. Grace-Period Burst Lock: Prevents lock resets between rapid bullet intervals.
-// 4. Progressive Body-to-Head Drag: Bullets climb naturally from chest to head.
+// 4. Trajectory Write: only the client bullet direction is steered. Recoil is
+//    never read, never scaled, never written — the game's own recoil runs as shipped.
 // 5. Strict FOV Circle: Strictly respects FOV limit; never locks outside.
+// 6. Wall Filter: a target behind cover is never acquired and never held. The
+//    gate is the game's own AvatarManager visible flag, debounced in data.cpp.
 
 namespace aimbot {
 
@@ -154,7 +157,12 @@ namespace aimbot {
         if (s_lockedTargetAddr != 0) {
             for (const auto& enemy : enemies) {
                 if (enemy.addr == s_lockedTargetAddr) {
-                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f) {
+                    // Wall filter on the sticky path too: a target that stepped
+                    // behind cover drops the lock on the same pass the game
+                    // clears its visible flag (debounced 2 frames in data.cpp,
+                    // ~32 ms at the 16 ms read cadence). No direction write
+                    // happens on a frame without a live visible target.
+                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f && enemy.isVisible) {
                         float dxHead = enemy.Head.x - screenCx;
                         float dyHead = enemy.Head.y - screenCy;
                         float distHead = sqrtf(dxHead * dxHead + dyHead * dyHead);
@@ -191,7 +199,12 @@ namespace aimbot {
             for (const auto& enemy : enemies) {
                 if (enemy.Head.z < 0.05f || enemy.curHP <= 0) continue;
                 if (cfg::aim::ignore_bots && enemy.isBot) continue;
-                if (cfg::aim::visible_check && !enemy.isVisible) continue;
+
+                // Unconditional wall filter. The AvatarManager visible flag is
+                // the only occlusion signal a read-only external process has;
+                // acquiring through cover is exactly the behaviour that gets an
+                // account flagged, so there is no toggle for it.
+                if (!enemy.isVisible) continue;
                 if (enemy.distance > cfg::aim::max_distance) continue;
 
                 // Test both Head and Body center against screen FOV circle
@@ -253,7 +266,7 @@ namespace aimbot {
         // Dynamically rolls headshot vs chest hit based on cfg::aim::headshot_rate (0% - 100%)
         static uint64_t s_lastRollTarget = 0;
         static int s_burstRollCount = 0;
-        static bool s_rollIsHeadshot = true;
+        static bool s_rollIsHeadshot = false;
 
         if (s_lockedTargetAddr != s_lastRollTarget || (++s_burstRollCount % 6 == 0)) {
             s_lastRollTarget = s_lockedTargetAddr;
@@ -263,7 +276,16 @@ namespace aimbot {
             } else if (rate <= 0) {
                 s_rollIsHeadshot = false;
             } else {
-                s_rollIsHeadshot = ((rand() % 100) < rate);
+                // Self-seeded xorshift. libc rand() restarts from the same value
+                // in every process, so its roll sequence can be reconstructed
+                // from a single observation; this cannot be.
+                static uint32_t s_rollRng =
+                    0x9E3779B9u ^ static_cast<uint32_t>(time(nullptr)) ^
+                    (static_cast<uint32_t>(getpid()) * 2654435761u);
+                s_rollRng ^= s_rollRng << 13;
+                s_rollRng ^= s_rollRng >> 17;
+                s_rollRng ^= s_rollRng << 5;
+                s_rollIsHeadshot = ((s_rollRng % 100u) < static_cast<uint32_t>(rate));
             }
         }
 
@@ -328,23 +350,10 @@ namespace aimbot {
                         // We achieve natural aim connection strictly via client trajectory (dirAddr).
                         (void)lockToHead;
 
-                        // ── SAFE RANDOMIZED RECOIL MICRO-VARIATION ────────────────────
-                        // Never zero or lock flat. Mimics physical barrel dynamics with subtle variance.
-                        uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player::Weapon);
-                        if (is_valid_ptr(weapon)) {
-                            uint64_t wdata = rpm<uint64_t>(weapon + Offsets::Weapon::Data);
-                            if (is_valid_ptr(wdata)) {
-                                float currentRecoil = rpm<float>(wdata + Offsets::Weapon::Recoil);
-                                if (std::isfinite(currentRecoil) && currentRecoil > 0.05f) {
-                                    // Soft reduction with natural drift (15% - 25% retention)
-                                    static uint32_t s_recoilRnd = 0x89AB;
-                                    s_recoilRnd ^= s_recoilRnd << 13;
-                                    s_recoilRnd ^= s_recoilRnd >> 17;
-                                    float variance = 0.16f + ((s_recoilRnd % 10) * 0.01f);
-                                    wpm<float>(wdata + Offsets::Weapon::Recoil, currentRecoil * variance);
-                                }
-                            }
-                        }
+                        // NOTE [RECOIL]:
+                        // The game's own recoil is intentionally left alone. No recoil
+                        // field is read, scaled or written. Only the bullet direction
+                        // above is steered; everything downstream is the game's.
                     }
                 }
             }

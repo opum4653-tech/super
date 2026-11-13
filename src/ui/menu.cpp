@@ -2,12 +2,11 @@
 #include "imgui.h"
 #include "Android_draw/draw.h"
 #include "Android_touch/Touch.hpp"
-#include "other/logger.hpp"
+#include "other/settings_guard.hpp"
 #include "func/esp.hpp"
 #include "func/aim.hpp"
 #include "cfg.hpp"
 #include "game/data.hpp"
-#include "encrypt.h"
 #include <string>
 #include <cmath>
 #include <algorithm>
@@ -161,7 +160,7 @@ static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, flo
 }
 
 // ----------------------------------------------------------------------------
-// CUSTOM WIDGET: TOP-RIGHT SQUARE CONTROL BUTTONS ([ L ] and [ - ])
+// CUSTOM WIDGET: TOP-RIGHT SQUARE CONTROL BUTTON ( - )
 // ----------------------------------------------------------------------------
 static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, float size, float ui_scale = 1.0f) {
     ImGui::SetCursorScreenPos(pos);
@@ -386,7 +385,6 @@ namespace ui::menu {
                 if (cur_time - s_last_toggle_time > 0.30) {
                     menu_open = !menu_open;
                     s_last_toggle_time = cur_time;
-                    LOG_INFO("CRACK MASTER Menu TOGGLED -> menu_open=%s", menu_open ? "TRUE" : "FALSE");
                 }
                 s_moved_drag = false;
                 s_is_dragging = false;
@@ -477,7 +475,7 @@ namespace ui::menu {
             ImVec2 curWinSize = ImGui::GetWindowSize();
 
             // ----------------------------------------------------------------
-            // 1. TITLE BAR (CRACK MASTER in Neon Green + [ L ] and [ - ])
+            // 1. TITLE BAR (CRACK MASTER in Neon Green + [ - ])
             // ----------------------------------------------------------------
             const float headerH = 48.0f * ui_scale;
             const char* brandTitle = "CRACK MASTER";
@@ -492,7 +490,7 @@ namespace ui::menu {
 
             // Drag area across header (except right buttons)
             const float btnSize = 32.0f * ui_scale;
-            const float rightButtonsWidth = btnSize * 2.0f + 20.0f * ui_scale;
+            const float rightButtonsWidth = btnSize + 14.0f * ui_scale;
             ImGui::SetCursorScreenPos(curWinPos);
             ImGui::InvisibleButton("##HeaderDragZone", ImVec2(curWinSize.x - rightButtonsWidth - 10.0f, headerH));
             if (ImGui::IsItemActive()) {
@@ -502,13 +500,9 @@ namespace ui::menu {
                 s_menu_pos.y = std::max(0.0f, std::min(s_menu_pos.y, realH - winH));
             }
 
-            // Top-right buttons: [ L ] and [ - ] (Enlarged)
+            // Top-right button: [ - ] (Enlarged)
             float btnY = curWinPos.y + (headerH - btnSize) * 0.5f;
             float btnMinusX = curWinPos.x + curWinSize.x - btnSize - 14.0f * ui_scale;
-            float btnLX     = btnMinusX - btnSize - 8.0f * ui_scale;
-
-            // [ L ] Button
-            DrawHeaderSquareBtn("##TopBtnL", "L", ImVec2(btnLX, btnY), btnSize, ui_scale);
 
             // [ - ] Button (Minimize to floating pill)
             if (DrawHeaderSquareBtn("##TopBtnMinus", "-", ImVec2(btnMinusX, btnY), btnSize, ui_scale)) {
@@ -564,7 +558,7 @@ namespace ui::menu {
 
                     ImGui::Text("Target PID: %d", static_cast<int>(proc::pid));
                     if (proc::lib) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "libil2cpp: 0x%lx", (unsigned long)proc::lib);
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "module base: 0x%lx", (unsigned long)proc::lib);
                     } else {
                         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Waiting for Free Fire...");
                     }
@@ -642,9 +636,7 @@ namespace ui::menu {
                     DrawToggleSwitch("Scope Aim (Head Lock)", &cfg::aim::scope_aim, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Sniper Headshot Lock", &cfg::aim::sniper_aim, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Ignore Knocked", &cfg::aim::ignore_knocked, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Check Visibility Only", &cfg::aim::visible_check, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
                     DrawSectionHeader(cdl, "FOV & Smooth Settings", ui_scale);
@@ -710,6 +702,7 @@ namespace ui::menu {
             Touch_Close();
             data::thread_stop();
             shutdown();
+            settings_guard::restore();
             exit(0);
         }
     }
