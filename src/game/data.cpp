@@ -58,15 +58,42 @@ namespace data {
         }
     };
 
-    // HP — the pool pointer arrives from the span; the three objects below it
-    // are separate allocations and stay one read each.
-    static int readHP(uint64_t pool) {
-        if (!pool) return 0;
+    // HEALTH & ARMOR — Live extraction from Il2Cpp PRIDataPool
+    // pool is m_PRIDataPool (0x70) on player.
+    // pool + 0x10 is m_Datas (ReplicationData[] array).
+    // Array count is at +0x18. Elements start at +0x20.
+    // Index 0 (+0x20): CurHP (ReplicationData*)
+    // Index 1 (+0x28): MaxHP (ReplicationData*)
+    // Index 4 (+0x40): CurAP (ReplicationData*, Armor Points)
+    // Value is stored at +0x18 (Offsets::HP_Value) inside each ReplicationData.
+    static void readHealthAndArmor(uint64_t pool, int& curHP, int& maxHP, int& curArmor) {
+        curHP = 0;
+        maxHP = 0;
+        curArmor = 0;
+        if (!pool) return;
         auto datas = rpm<uint64_t>(pool + Offsets::HP_List);
-        if (!datas) return 0;
-        auto elem  = rpm<uint64_t>(datas + Offsets::HP_Entry);
-        if (!elem) return 0;
-        return rpm<int>(elem + Offsets::HP_Value);
+        if (!datas) return;
+        int count = rpm<int>(datas + 0x18);
+        if (count <= 0 || count > 128) return;
+
+        // Index 0: CurHP
+        auto elem0 = rpm<uint64_t>(datas + Offsets::HP_Entry);
+        if (elem0) curHP = rpm<int>(elem0 + Offsets::HP_Value);
+
+        // Index 1: MaxHP (Live maximum HP read from replication pool)
+        if (count > 1) {
+            auto elem1 = rpm<uint64_t>(datas + 0x28);
+            if (elem1) maxHP = rpm<int>(elem1 + Offsets::HP_Value);
+        }
+
+        // Live dynamic safeguard: MaxHP is at least current HP
+        if (maxHP < curHP) maxHP = curHP;
+
+        // Index 4: CurAP (Armor Points)
+        if (count > 4) {
+            auto elem4 = rpm<uint64_t>(datas + 0x40);
+            if (elem4) curArmor = rpm<int>(elem4 + Offsets::HP_Value);
+        }
     }
 
     // NAME
@@ -181,11 +208,24 @@ namespace data {
             localPlayerAddr.store(0);
             {
                 std::lock_guard<std::mutex> lk(players_mutex);
-                players.clear();
+                if (!players.empty()) players.clear();
             }
             {
                 std::lock_guard<std::mutex> lk(loots_mutex);
-                loots.clear();
+                if (!loots.empty()) loots.clear();
+            }
+            if (!g_visStable.empty()) g_visStable.clear();
+            if (!g_visCounter.empty()) g_visCounter.clear();
+            return;
+        }
+
+        // Feature-muted mode: user turned off all ESP & Aim switches in menu.
+        // Return immediately without reading camera, bones, or enemy lists.
+        if (!cfg::any_feature_enabled()) {
+            localPlayerAddr.store(0);
+            {
+                std::lock_guard<std::mutex> lk(players_mutex);
+                if (!players.empty()) players.clear();
             }
             return;
         }
@@ -275,8 +315,9 @@ namespace data {
             if (span.at<bool>(Offsets::Player_IsDead)) continue;
             bool isBot = span.at<bool>(Offsets::Player_IsBot);
 
-            int hp = readHP(span.at<uint64_t>(Offsets::Player_HP));
-            if (hp <= 0) continue;
+            int curHP = 0, maxHP = 0, curArmor = 0;
+            readHealthAndArmor(span.at<uint64_t>(Offsets::Player_HP), curHP, maxHP, curArmor);
+            if (curHP <= 0) continue;
 
             auto avatarMgr = span.at<uint64_t>(Offsets::Player_Avatar);
             if (!avatarMgr) continue;
@@ -345,9 +386,9 @@ namespace data {
             pd.isVisible  = visible;
             pd.isBot      = isBot;
             pd.distance   = dist;
-            pd.curHP      = hp;
-            pd.maxHP      = 200;
-            pd.curArmor   = span.at<int>(Offsets::Player_Armor);
+            pd.curHP      = curHP;
+            pd.maxHP      = maxHP;
+            pd.curArmor   = curArmor;
             pd.isFiring   = span.at<bool>(Offsets::Player_IsFiring);
             pd.isGrounded = span.at<bool>(Offsets::Player_IsGrounded);
 
@@ -371,6 +412,28 @@ namespace data {
     // THREAD
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
+            bool in_m = inMatch.load(std::memory_order_relaxed);
+            bool features_on = cfg::any_feature_enabled();
+
+            if (!in_m) {
+                // LOBBY MODE: Player is in lobby / matchmaking / loading.
+                // Idle at low frequency (350ms) checking only match state.
+                // Zero player/bone/matrix scraping.
+                update();
+                std::this_thread::sleep_for(std::chrono::milliseconds(350));
+                continue;
+            }
+
+            if (!features_on) {
+                // IN MATCH, BUT FEATURES MUTED IN MENU:
+                // Idle at 250ms — zero entity scraping while switches are off.
+                update();
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                continue;
+            }
+
+            // ACTIVE MATCH + FEATURES ON:
+            // High-precision smooth frame read (16ms)
             update();
             int iv = cfg::aim::read_interval_ms;
             if (iv < 8) iv = 8;

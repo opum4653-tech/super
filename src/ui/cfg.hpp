@@ -51,4 +51,12 @@ namespace aim {
     inline bool  ignore_bots      = false;
     inline float max_distance     = 200.0f;
 }
+
+inline bool any_feature_enabled() {
+    return aim::enable || esp::line || esp::box || esp::health ||
+           esp::name || esp::distance || esp::weapon ||
+           esp::tracer || esp::loot || esp::crosshair;
 }
+
+}
+

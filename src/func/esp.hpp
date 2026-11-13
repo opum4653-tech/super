@@ -1,5 +1,7 @@
 #pragma once
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
+#endif
 #include "imgui.h"
 #include "../game/data.hpp"
 #include "../ui/cfg.hpp"
@@ -14,6 +16,12 @@ extern float g_sw, g_sh;
 
 namespace func::esp {
 
+    inline bool is_active() {
+        return cfg::esp::line || cfg::esp::box || cfg::esp::health ||
+               cfg::esp::name || cfg::esp::distance || cfg::esp::weapon ||
+               cfg::esp::tracer || cfg::esp::loot || cfg::esp::crosshair;
+    }
+
     // HELPER COLOR
     inline ImU32 toU32(const ImVec4& c, float alphaMul = 1.f) {
         return IM_COL32(
@@ -24,9 +32,9 @@ namespace func::esp {
     }
 
     inline ImU32 withAlpha(ImU32 c, float mul) {
-        int a = (int)(((c >> 24) & 0xFF) * mul);
-        if (a < 0) a = 0; if (a > 255) a = 255;
-        return (c & 0x00FFFFFF) | ((ImU32)a << 24);
+        float aF = ((float)((c >> 24) & 0xFF)) * mul;
+        int a = (int)ImClamp(aF, 0.0f, 255.0f);
+        return (c & 0x00FFFFFF) | ((ImU32)(uint32_t)a << 24);
     }
 
     inline ImU32 fadeDist(ImU32 base, float dist, float maxRange) {
@@ -169,7 +177,7 @@ namespace func::esp {
         float barW = 4.f;
 
         if (cfg::esp::health) {
-            float hp01 = p.maxHP > 0 ? (float)p.curHP / (float)p.maxHP : 0.f;
+            float hp01 = p.maxHP > 0 ? (float)p.curHP / (float)p.maxHP : (p.curHP > 0 ? 1.0f : 0.0f);
             hp01 = ImClamp(hp01, 0.f, 1.f);
 
             // Background track + border

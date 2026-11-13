@@ -56,14 +56,12 @@ namespace Offsets {
         constexpr uintptr_t IsGrounded           = 0x11C;   // Boolean
         constexpr uintptr_t FOVOffset            = 0x84;    // Single
         constexpr uintptr_t Weapon               = 0x600;   // WeaponOnHand
-        constexpr uintptr_t ColWrite             = 0x80;    // Collider Write
         constexpr uintptr_t DeathInfo            = 0x24A8;  // DeathInfo
     }
 
 // Weapon Data Fields
     namespace Weapon {
         constexpr uintptr_t Data                 = 0x80;
-        constexpr uintptr_t Recoil               = 0x18;
     }
 
 // Avatar Visibility
@@ -148,7 +146,6 @@ namespace Offsets {
     constexpr uintptr_t Player_Armor             = Player::Armor;
     constexpr uintptr_t Player_IsDead            = Player::IsDead;
     constexpr uintptr_t Player_Avatar            = Player::Avatar;
-    constexpr uintptr_t Player_HedColider        = Player::HeadCollider;
     constexpr uintptr_t Player_IsBot             = Player::IsBot;
     constexpr uintptr_t Player_Name              = Player::Name;
     constexpr uintptr_t Player_Speed             = Player::Speed;
@@ -157,7 +154,6 @@ namespace Offsets {
     constexpr uintptr_t Player_IsGrounded        = Player::IsGrounded;
     constexpr uintptr_t Player_FOVOffset         = Player::FOVOffset;
     constexpr uintptr_t Player_Weapon            = Player::Weapon;
-    constexpr uintptr_t Player_ColWrite          = Player::ColWrite;
     constexpr uintptr_t Player_DeathInfo         = Player::DeathInfo;
 
     constexpr uintptr_t Avatar_Uma               = Avatar::Uma;
@@ -174,7 +170,6 @@ namespace Offsets {
     constexpr uintptr_t HP_Value                 = 0x18;
 
     constexpr uintptr_t Weapon_Data              = Weapon::Data;
-    constexpr uintptr_t Weapon_Recoil            = Weapon::Recoil;
 
     constexpr uintptr_t AimInfo_Direction        = Aim::Direction;
     constexpr uintptr_t AimInfo_StartPosition    = Aim::StartPosition;

@@ -268,7 +268,7 @@ namespace aimbot {
         static int s_burstRollCount = 0;
         static bool s_rollIsHeadshot = false;
 
-        if (s_lockedTargetAddr != s_lastRollTarget || (++s_burstRollCount % 6 == 0)) {
+        if (s_lockedTargetAddr != s_lastRollTarget || s_burstRollCount == 0 || (++s_burstRollCount % 4 == 0)) {
             s_lastRollTarget = s_lockedTargetAddr;
             int rate = static_cast<int>(cfg::aim::headshot_rate);
             if (rate >= 100) {
@@ -306,12 +306,13 @@ namespace aimbot {
                 } else if (cfg::aim::target_bone == 2) {
                     target3D.y -= 0.35f; // Body / Pelvis
                 } else {
-                    if (lockToHead) {
+                    float rateFraction = ImClamp(cfg::aim::headshot_rate, 0.0f, 100.0f) * 0.01f;
+                    if (isSniperShot || lockToHead) {
                         // Skull elevation: slightly higher compensation (+0.15m) for sniper projectile drop
                         target3D.y += isSniperShot ? 0.15f : 0.12f;
                     } else {
-                        // Chest / torso impact when headshot roll fails
-                        target3D.y -= 0.22f;
+                        // Continuous blending from torso to neck depending on user's headshot_rate
+                        target3D.y -= (0.24f * (1.0f - rateFraction));
                     }
                 }
 

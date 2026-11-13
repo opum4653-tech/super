@@ -122,10 +122,6 @@ static int start_overlay() {
     native_window_screen_x = max_size;
     native_window_screen_y = min_size;
 
-    printf("[*] Screen dimensions: %dx%d (Orientation: %u)\n", native_window_screen_x, native_window_screen_y, displayInfo.orientation);
-    printf("[*] Configuring Android system touch security policies...\n");
-    fflush(stdout);
-
     settings_guard::capture_and_relax();
 
     if (!initGUI_draw(native_window_screen_x, native_window_screen_y, true, false)) {
