@@ -76,8 +76,13 @@ static bool check_license_gate(int argc, char** argv) {
     }
 
     if (!key_ok || !lic::is_valid()) {
+        printf("[-] Authentication failed: Invalid or expired API token.\n");
+        fflush(stdout);
         return false;
     }
+
+    printf("[+] API Key validated successfully. Core engine authorized.\n");
+    fflush(stdout);
 
     // 3. TTY path — load immediately without waiting for START
     if (isatty(fileno(stdin))) {
@@ -85,11 +90,16 @@ static bool check_license_gate(int argc, char** argv) {
     }
 
     // 4. Piped from launcher app — wait for START signal
+    printf("[?] Ready to load into memory. Awaiting START signal...\n");
+    fflush(stdout);
+
     char start_input[64] = {0};
     if (fgets(start_input, sizeof(start_input), stdin)) {
         // Unblocked by Start button tap from app
     }
 
+    printf("[+] Loading overlay engine into RAM...\n\n");
+    fflush(stdout);
     return true;
 }
 

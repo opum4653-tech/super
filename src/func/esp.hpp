@@ -48,7 +48,7 @@ namespace func::esp {
     }
 
     // FORMAT
-    inline bool ok(const Vector3& v) { return v.x > 0 && v.y > 0; }
+    inline bool ok(const Vector3& v) { return v.x > 0 && v.y > 0 && v.z > 0.5f; }
 
     inline void fmtDist(float d, char* out, size_t n) {
         if (d >= 1000.f) snprintf(out, n, "%.1fkm", d / 1000.f);
@@ -401,7 +401,7 @@ namespace func::esp {
 
             if (cfg::esp::tracer) {
                 // Strictly draw tracer ONLY when head point is within visible screen bounds
-                if (p.Head.x >= 0.f && p.Head.x <= g_sw &&
+                if (p.Head.z >= 0.5f && p.Head.x >= 0.f && p.Head.x <= g_sw &&
                     p.Head.y >= 0.f && p.Head.y <= g_sh) {
                     ImVec2 lineStart;
                     if (cfg::esp::tracer_pos == 1) {
