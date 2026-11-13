@@ -53,8 +53,6 @@ namespace aimbot {
     // Target stickiness with hysteresis & grace period to completely eliminate screen shaking
     inline uint64_t s_lockedTargetAddr = 0;
     inline int      s_lockTimeoutTicks = 0;
-    inline int      s_burstTicks       = 0;
-    inline Vector3  s_prevDir          = Vector3::Zero();
 
     // ── SMOOTH DIRECTION LERP STATE ──────────────────────────────────────────
     // Tracks the last written shot direction so lerp interpolates from it each frame.
@@ -65,16 +63,16 @@ namespace aimbot {
         if (!cfg::aim::enable) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
-            s_burstTicks = 0;
-            s_prevDir   = Vector3::Zero();
+            
+            
             s_smoothDir = Vector3::Zero();
             return;
         }
         if (!data::inMatch.load(std::memory_order_relaxed)) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
-            s_burstTicks = 0;
-            s_prevDir = Vector3::Zero();
+            
+            
             return;
         }
 
@@ -82,8 +80,8 @@ namespace aimbot {
         if (!is_valid_ptr(localPlayer)) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
-            s_burstTicks = 0;
-            s_prevDir = Vector3::Zero();
+            
+            
             return;
         }
 
@@ -91,8 +89,8 @@ namespace aimbot {
         if (rpm<bool>(localPlayer + Offsets::Player::IsDead)) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
-            s_burstTicks = 0;
-            s_prevDir = Vector3::Zero();
+            
+            
             return;
         }
 
@@ -123,8 +121,8 @@ namespace aimbot {
                 s_lockTimeoutTicks--;
             } else {
                 s_lockedTargetAddr = 0;
-                s_burstTicks = 0;
-                s_prevDir   = Vector3::Zero();
+                
+                
                 s_smoothDir = Vector3::Zero();
             }
             return;
@@ -141,8 +139,8 @@ namespace aimbot {
 
         if (enemies.empty()) {
             s_lockedTargetAddr = 0;
-            s_burstTicks = 0;
-            s_prevDir = Vector3::Zero();
+            
+            
             return;
         }
 
@@ -187,8 +185,8 @@ namespace aimbot {
             // If locked enemy died or left FOV circle, clear lock to allow new target acquisition
             if (!bestEnemy) {
                 s_lockedTargetAddr = 0;
-                s_burstTicks = 0;
-                s_prevDir = Vector3::Zero();
+                
+                
             }
         }
 
@@ -240,18 +238,18 @@ namespace aimbot {
             if (bestEnemy) {
                 s_lockedTargetAddr = bestEnemy->addr;
                 s_lockTimeoutTicks = 30;
-                s_burstTicks = 0;
+                
             }
         }
 
         if (!bestEnemy) {
             s_lockedTargetAddr = 0;
-            s_burstTicks = 0;
-            s_prevDir = Vector3::Zero();
+            
+            
             return;
         }
 
-        s_burstTicks++;
+        
 
         // Record target diagnostic telemetry
         g_currentTarget.valid = true;
