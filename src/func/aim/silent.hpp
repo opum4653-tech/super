@@ -60,5 +60,3 @@ namespace aimbot {
     }
 
 } // namespace aimbot
-
-} // namespace aimbot

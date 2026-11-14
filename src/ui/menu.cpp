@@ -530,7 +530,7 @@ namespace ui::menu {
             dl->AddCircleFilled(dotCenter, dotRadius, dotCol, 16);
 
             const char* mStatusText = cfg::master_enabled ? "MASTER: ACTIVE" : "MASTER: PAUSED (Suppressed)";
-            ImU32 mStatusCol = cfg::master_enabled ? theme_overlay::ColAccent : IM_COL32(230, 100, 100, 255);
+            ImU32 mStatusCol = cfg::master_enabled ? theme_overlay::ColAccentBar : IM_COL32(230, 100, 100, 255);
             dl->AddText(font, 13.0f * ui_scale, ImVec2(mBarMin.x + 28.0f * ui_scale, mBarMin.y + (masterBarH - 13.0f * ui_scale) * 0.5f), mStatusCol, mStatusText);
 
             // Large interactive Toggle on right side of the master bar
