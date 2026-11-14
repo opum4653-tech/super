@@ -239,11 +239,22 @@ namespace lic {
         return total;
     }
 
+    static std::string url_encode(CURL* curl, const std::string& val) {
+        if (!curl) return val;
+        char* output = curl_easy_escape(curl, val.c_str(), static_cast<int>(val.length()));
+        if (output) {
+            std::string res(output);
+            curl_free(output);
+            return res;
+        }
+        return val;
+    }
+
     static bool verify_license_online(const std::string& key) {
         std::string hwid = get_device_hwid();
-        std::string server_url = "https://ninmods.smmtor.com";
-        const char* env_url = getenv("AUTH_SERVER_URL");
-        if (!env_url) env_url = getenv("CRACKMASTER_SERVER_URL");
+        std::string server_url = "https://crackmaster.shop";
+        const char* env_url = getenv("CRACKMASTER_SERVER_URL");
+        if (!env_url) env_url = getenv("AUTH_SERVER_URL");
         if (env_url && strlen(env_url) > 0) {
             server_url = std::string(env_url);
             while (!server_url.empty() && server_url.back() == '/') {
@@ -254,26 +265,29 @@ namespace lic {
         char response[4096] = {0};
         bool executed = false;
 
-        std::string endpoint = server_url + "/api/verify.php";
-        std::string post_fields = "user_key=" + key + "&serial=" + hwid + "&game=FreeFire";
-
-        auto perform_request = [&](bool insecure_ssl) -> bool {
+        auto perform_request = [&](const std::string& base_url, bool insecure_ssl) -> bool {
             CURL* curl = curl_easy_init();
             if (!curl) return false;
 
             std::string curl_resp;
+            std::string endpoint = base_url + "/api/verify.php";
+
+            std::string enc_key = url_encode(curl, key);
+            std::string enc_hwid = url_encode(curl, hwid);
+            std::string post_fields = "user_key=" + enc_key + "&serial=" + enc_hwid + "&game=FreeFire";
+
             struct curl_slist* headers = nullptr;
             headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
             headers = curl_slist_append(headers, "Accept: application/json");
-            headers = curl_slist_append(headers, "User-Agent: Client-Core/2.0");
+            headers = curl_slist_append(headers, "User-Agent: CrackMaster-Core/2.0");
 
             curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_fields.c_str());
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_string_cb);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &curl_resp);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
-            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);
             curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
             int ca_fd = -1;
@@ -300,20 +314,26 @@ namespace lic {
 
             if (res == CURLE_OK && !curl_resp.empty()) {
                 strncpy(response, curl_resp.c_str(), sizeof(response) - 1);
+                response[sizeof(response) - 1] = '\0';
                 return true;
             }
             return false;
         };
 
-        // Try standard TLS first with trusted CA bundle
-        executed = perform_request(false);
+        // 1. Standard HTTPS with CA bundle
+        executed = perform_request(server_url, false);
+        // 2. Fallback HTTPS without strict CA check
         if (!executed) {
-            // Fallback for custom ROMs / devices with restricted memfd/SELinux
-            executed = perform_request(true);
+            executed = perform_request(server_url, true);
+        }
+        // 3. Fallback HTTP if HTTPS port is blocked
+        if (!executed && server_url.rfind("https://", 0) == 0) {
+            std::string http_url = "http://" + server_url.substr(8);
+            executed = perform_request(http_url, true);
         }
 
         if (!executed || strlen(response) == 0) {
-            printf("[-] Network error: Unable to reach license verification gateway.\n");
+            printf("[-] Authentication failed: Network error - unable to connect to license server.\n");
             fflush(stdout);
             return false;
         }
@@ -389,6 +409,7 @@ namespace lic {
         char errMsg[256] = {0};
         const char* errPtr = strstr(response, "\"reason\"");
         if (!errPtr) errPtr = strstr(response, "\"message\"");
+        if (!errPtr) errPtr = strstr(response, "\"error\"");
 
         if (errPtr) {
             const char* colon = strchr(errPtr, ':');

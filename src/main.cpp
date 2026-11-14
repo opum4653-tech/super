@@ -46,7 +46,7 @@ static bool check_license_gate(int argc, char** argv) {
     //    The token below is a handshake, not a log line: the launcher watches
     //    stdout for it to open the key dialog. It is the only byte this process
     //    writes to a stream. No banner, no status, no result text.
-    printf("[?] Enter API Access Key: ");
+    printf("[?] Enter API Access Key:\n");
     fflush(stdout);
 
     char key_input[128] = {0};
