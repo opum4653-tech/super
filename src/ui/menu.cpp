@@ -270,16 +270,10 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
 namespace ui::menu {
 
     void render() {
-        // Render background overlays (ESP & Aimbot FOV) strictly when in match
-        if (data::inMatch.load(std::memory_order_relaxed)) {
-            if (func::esp::is_active()) {
-                func::esp::draw();
-            }
-            if (cfg::aim::enable) {
-                func::aim::update();
-                func::aim::render_fov(ImGui::GetBackgroundDrawList());
-            }
-        }
+        // Render background overlays (ESP & Aimbot FOV)
+        func::esp::draw();
+        func::aim::update();
+        func::aim::render_fov(ImGui::GetBackgroundDrawList());
 
         ImGuiIO& io = ImGui::GetIO();
 

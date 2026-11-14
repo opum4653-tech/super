@@ -73,26 +73,26 @@ namespace data {
         if (!pool) return;
         auto datas = rpm<uint64_t>(pool + Offsets::HP_List);
         if (!datas) return;
-        int count = rpm<int>(datas + 0x18);
-        if (count <= 0 || count > 128) return;
 
-        // Index 0: CurHP
+        // 1. Live Current Health (Proven Index 0 at Offsets::HP_Entry = 0x20)
         auto elem0 = rpm<uint64_t>(datas + Offsets::HP_Entry);
-        if (elem0) curHP = rpm<int>(elem0 + Offsets::HP_Value);
-
-        // Index 1: MaxHP (Live maximum HP read from replication pool)
-        if (count > 1) {
-            auto elem1 = rpm<uint64_t>(datas + 0x28);
-            if (elem1) maxHP = rpm<int>(elem1 + Offsets::HP_Value);
+        if (elem0) {
+            curHP = rpm<int>(elem0 + Offsets::HP_Value);
         }
 
-        // Live dynamic safeguard: MaxHP is at least current HP
+        // 2. Live Maximum Health (Index 1 at 0x28 if registered)
+        auto elem1 = rpm<uint64_t>(datas + 0x28);
+        if (elem1 && elem1 > 0x10000) {
+            int m = rpm<int>(elem1 + Offsets::HP_Value);
+            if (m > 0 && m <= 1000) maxHP = m;
+        }
         if (maxHP < curHP) maxHP = curHP;
+        if (maxHP <= 0) maxHP = (curHP > 0 ? curHP : 200);
 
-        // Index 4: CurAP (Armor Points)
-        if (count > 4) {
-            auto elem4 = rpm<uint64_t>(datas + 0x40);
-            if (elem4) curArmor = rpm<int>(elem4 + Offsets::HP_Value);
+        // 3. Live Armor Points (Index 4 at 0x40 if registered)
+        auto elem4 = rpm<uint64_t>(datas + 0x40);
+        if (elem4 && elem4 > 0x10000) {
+            curArmor = rpm<int>(elem4 + Offsets::HP_Value);
         }
     }
 
@@ -201,7 +201,9 @@ namespace data {
         auto BaseGame = rpm<uint64_t>(StaticFields + 0x8);
         if (!BaseGame) return;
 
-        bool matchActive = rpm<bool>(BaseGame + Offsets::MatchIsRunning);
+        auto m_Match = rpm<uint64_t>(BaseGame + Offsets::BaseGame_Match);
+        auto localPlayer = m_Match ? rpm<uint64_t>(m_Match + Offsets::Match_LocalPlayer) : 0;
+        bool matchActive = rpm<bool>(BaseGame + Offsets::MatchIsRunning) || (localPlayer != 0);
         inMatch.store(matchActive);
 
         if (!matchActive) {
@@ -222,7 +224,6 @@ namespace data {
         // Feature-muted mode: user turned off all ESP & Aim switches in menu.
         // Return immediately without reading camera, bones, or enemy lists.
         if (!cfg::any_feature_enabled()) {
-            localPlayerAddr.store(0);
             {
                 std::lock_guard<std::mutex> lk(players_mutex);
                 if (!players.empty()) players.clear();
@@ -230,14 +231,11 @@ namespace data {
             return;
         }
 
-        auto m_Match = rpm<uint64_t>(BaseGame + Offsets::BaseGame_Match);
         if (!m_Match) {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
         }
-
-        auto localPlayer = rpm<uint64_t>(m_Match + Offsets::Match_LocalPlayer);
 
         // Simpan local player
         localPlayerAddr.store(localPlayer ? localPlayer : 0);
@@ -412,32 +410,16 @@ namespace data {
     // THREAD
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
-            bool in_m = inMatch.load(std::memory_order_relaxed);
-            bool features_on = cfg::any_feature_enabled();
-
-            if (!in_m) {
-                // LOBBY MODE: Player is in lobby / matchmaking / loading.
-                // Idle at low frequency (350ms) checking only match state.
-                // Zero player/bone/matrix scraping.
-                update();
-                std::this_thread::sleep_for(std::chrono::milliseconds(350));
-                continue;
-            }
-
-            if (!features_on) {
-                // IN MATCH, BUT FEATURES MUTED IN MENU:
-                // Idle at 250ms — zero entity scraping while switches are off.
-                update();
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                continue;
-            }
-
-            // ACTIVE MATCH + FEATURES ON:
-            // High-precision smooth frame read (16ms)
             update();
             int iv = cfg::aim::read_interval_ms;
             if (iv < 8) iv = 8;
             if (iv > 100) iv = 100;
+
+            // If not in match, throttle politely to 100ms (10 checks/sec)
+            if (!inMatch.load(std::memory_order_relaxed)) {
+                iv = 100;
+            }
+
             std::this_thread::sleep_for(std::chrono::milliseconds(iv));
         }
     }

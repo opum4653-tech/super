@@ -19,7 +19,8 @@ namespace func::esp {
     inline bool is_active() {
         return cfg::esp::box || cfg::esp::health || cfg::esp::armor ||
                cfg::esp::name || cfg::esp::distance || cfg::esp::weapon ||
-               cfg::esp::tracer || cfg::esp::loot || cfg::esp::crosshair;
+               cfg::esp::tracer || cfg::esp::loot || cfg::esp::crosshair ||
+               cfg::esp::firing_ind;
     }
 
     // HELPER COLOR CONVERSIONS

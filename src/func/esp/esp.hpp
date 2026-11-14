@@ -13,7 +13,7 @@ namespace func::esp {
 
     // MAIN ESP DRAW PIPELINE
     inline void draw() {
-        if (!data::inMatch.load(std::memory_order_relaxed)) return;
+        if (!is_active()) return;
 
         ImDrawList* dl = ImGui::GetForegroundDrawList();
 
