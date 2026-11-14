@@ -98,6 +98,9 @@ namespace aimbot {
 
         // FIRING & SCOPING STATE
         bool isFiring = rpm<bool>(localPlayer + Offsets::Player::IsFiring);
+        if (!isFiring) {
+            isFiring = rpm<bool>(localPlayer + 0x850);
+        }
 
         // FollowCamera is at localPlayer + 0x690. Inside FollowCamera, FOVOffset is at 0x84!
         // When scoping (especially sniper rifles like AWM, Kar98, M82B), FOVOffset shifts negative.
@@ -118,20 +121,18 @@ namespace aimbot {
         }
 
         if (!triggerActive) {
-            // Give grace period so lock doesn't drop between rapid-fire bullets
+            // Grace period: keep aim trajectory active across rapid-fire bullet intervals
             if (s_lockTimeoutTicks > 0) {
                 s_lockTimeoutTicks--;
             } else {
                 s_lockedTargetAddr = 0;
-                
-                
                 s_smoothDir = Vector3::Zero();
+                return;
             }
-            return;
+        } else {
+            // Active trigger -> refresh lock lease (approx 15-20 frames)
+            s_lockTimeoutTicks = 16;
         }
-
-        // Active trigger -> refresh lock lease
-        s_lockTimeoutTicks = 30;
 
         std::vector<PlayerData> enemies;
         {
@@ -262,99 +263,101 @@ namespace aimbot {
         g_currentTarget.screenPos = bestScreenPos;
         g_currentTarget.headWorld = bestEnemy->headWorld;
 
-        // 3. HEADSHOT PERCENTAGE RATE ENGINE
-        // Dynamically rolls headshot vs chest hit based on cfg::aim::headshot_rate (0% - 100%)
-        static uint64_t s_lastRollTarget = 0;
-        static int s_burstRollCount = 0;
-        static bool s_rollIsHeadshot = false;
+        // 3. HEADSHOT PERCENTAGE RATE ENGINE (0% - 100% controlled from menu)
+        float rate = cfg::aim::headshot_rate;
+        bool isSniperShot = (cfg::aim::sniper_aim && isScoping);
+        bool lockToHead = false;
 
-        if (s_lockedTargetAddr != s_lastRollTarget || s_burstRollCount == 0 || (++s_burstRollCount % 4 == 0)) {
-            s_lastRollTarget = s_lockedTargetAddr;
-            int rate = static_cast<int>(cfg::aim::headshot_rate);
-            if (rate >= 100) {
-                s_rollIsHeadshot = true;
-            } else if (rate <= 0) {
-                s_rollIsHeadshot = false;
-            } else {
-                // Self-seeded xorshift. libc rand() restarts from the same value
-                // in every process, so its roll sequence can be reconstructed
-                // from a single observation; this cannot be.
-                static uint32_t s_rollRng =
-                    0x9E3779B9u ^ static_cast<uint32_t>(time(nullptr)) ^
-                    (static_cast<uint32_t>(getpid()) * 2654435761u);
-                s_rollRng ^= s_rollRng << 13;
-                s_rollRng ^= s_rollRng >> 17;
-                s_rollRng ^= s_rollRng << 5;
-                s_rollIsHeadshot = ((s_rollRng % 100u) < static_cast<uint32_t>(rate));
+        if (isSniperShot || rate >= 100.0f) {
+            lockToHead = true;
+        } else if (rate <= 0.0f) {
+            lockToHead = false;
+        } else {
+            // Independent xorshift RNG roll against user's headshot_rate
+            static uint32_t s_rollRng =
+                0x9E3779B9u ^ static_cast<uint32_t>(time(nullptr)) ^
+                (static_cast<uint32_t>(getpid()) * 2654435761u);
+            s_rollRng ^= s_rollRng << 13;
+            s_rollRng ^= s_rollRng >> 17;
+            s_rollRng ^= s_rollRng << 5;
+            lockToHead = ((s_rollRng % 100u) < static_cast<uint32_t>(rate));
+        }
+
+        // 4. AIM COLLIDER OVERRIDE (Reference-aligned hit detection)
+        // Maps target's LockedAimingCollider (0x80) to HeadCollider (0x738 / 0x740)
+        // Ensures the game engine's internal raycast registers bullet impacts as Headshots.
+        if (lockToHead && is_valid_ptr(bestEnemy->addr)) {
+            uint64_t headCol = rpm<uint64_t>(bestEnemy->addr + Offsets::Player::HeadCollider);
+            if (!is_valid_ptr(headCol)) {
+                headCol = rpm<uint64_t>(bestEnemy->addr + 0x740);
+            }
+            if (is_valid_ptr(headCol)) {
+                wpm<uint64_t>(bestEnemy->addr + Offsets::Player::LockedAimingCollider, headCol);
             }
         }
 
-        // Sniper rifle auto-lock: when sniper_aim is active and player is scoping, ensure 100% skull connection
-        bool isSniperShot = (cfg::aim::sniper_aim && isScoping);
-        bool lockToHead = (isSniperShot || s_rollIsHeadshot);
-
-        // 4. 3D BULLET ALIGNMENT & COLLIDER OVERRIDE
+        // 5. 3D TRAJECTORY STEERING (AIMING INFO RAY DIRECTION)
         uint64_t aimInfo = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo);
+        if (!is_valid_ptr(aimInfo)) {
+            aimInfo = rpm<uint64_t>(localPlayer + 0xE58);
+        }
+
         if (is_valid_ptr(aimInfo)) {
             uint64_t dirAddr = aimInfo + Offsets::Aim::Direction;
             Vector3 bulletOrigin = rpm<Vector3>(aimInfo + Offsets::Aim::StartPosition);
+            if (bulletOrigin == Vector3::Zero() || bulletOrigin.sqrMagnitude() < 0.01f) {
+                uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
+                if (localHead) bulletOrigin = GetNodePosition(localHead);
+            }
 
             Vector3 target3D = bestEnemy->headWorld;
             if (target3D != Vector3::Zero()) {
                 if (cfg::aim::target_bone == 1) {
-                    target3D.y += 0.00f; // Neck / Upper Chest
+                    target3D.y -= 0.15f; // Neck / Upper Chest
                 } else if (cfg::aim::target_bone == 2) {
-                    target3D.y -= 0.35f; // Body / Pelvis
+                    target3D.y -= 0.40f; // Body / Pelvis
                 } else {
-                    float rateFraction = ImClamp(cfg::aim::headshot_rate, 0.0f, 100.0f) * 0.01f;
-                    if (isSniperShot || lockToHead) {
-                        // Skull elevation: slightly higher compensation (+0.15m) for sniper projectile drop
-                        target3D.y += isSniperShot ? 0.15f : 0.12f;
-                    } else {
-                        // Continuous blending from torso to neck depending on user's headshot_rate
-                        target3D.y -= (0.24f * (1.0f - rateFraction));
+                    if (!lockToHead) {
+                        target3D.y -= 0.30f; // Body / Chest on non-headshot rolls
                     }
+                    // When lockToHead is true: direct exact Head bone target (0.00m offset)!
                 }
 
                 if (std::isfinite(bulletOrigin.x) &&
                     std::isfinite(bulletOrigin.y) &&
                     std::isfinite(bulletOrigin.z) &&
-                    bulletOrigin.sqrMagnitude() > 1e-6f) {
-                    Vector3 diff = target3D - bulletOrigin;
-                    Vector3 shotDir = SafeNormalize(diff);
-                    if (std::isfinite(shotDir.x) && std::isfinite(shotDir.y) && std::isfinite(shotDir.z)) {
+                    bulletOrigin.sqrMagnitude() > 1e-4f) {
 
-                        // ── SMOOTH LERP WRITE (Human-like, not instant snap) ──────────────
-                        // cfg::aim::smooth: 1.0 = instant snap (original), 10.0 = very slow
-                        // Safe range: 3.0 – 8.0 looks natural, hard to fingerprint.
+                    Vector3 diff = target3D - bulletOrigin;
+                    float targetDist = sqrtf(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+
+                    if (targetDist > 1e-4f && std::isfinite(targetDist)) {
+                        Vector3 shotDir(diff.x / targetDist, diff.y / targetDist, diff.z / targetDist);
+
                         float lerpT = 1.0f / std::max(1.0f, cfg::aim::smooth);
 
-                        // Bootstrap s_smoothDir on first lock or after reset
                         if (s_smoothDir.sqrMagnitude() < 1e-6f) {
                             s_smoothDir = shotDir;
+                        } else {
+                            s_smoothDir.x += (shotDir.x - s_smoothDir.x) * lerpT;
+                            s_smoothDir.y += (shotDir.y - s_smoothDir.y) * lerpT;
+                            s_smoothDir.z += (shotDir.z - s_smoothDir.z) * lerpT;
+                            float smLen = sqrtf(s_smoothDir.x * s_smoothDir.x + s_smoothDir.y * s_smoothDir.y + s_smoothDir.z * s_smoothDir.z);
+                            if (smLen > 1e-4f) {
+                                s_smoothDir.x /= smLen;
+                                s_smoothDir.y /= smLen;
+                                s_smoothDir.z /= smLen;
+                            }
                         }
 
-                        // Lerp component-wise toward target direction
-                        s_smoothDir.x += (shotDir.x - s_smoothDir.x) * lerpT;
-                        s_smoothDir.y += (shotDir.y - s_smoothDir.y) * lerpT;
-                        s_smoothDir.z += (shotDir.z - s_smoothDir.z) * lerpT;
-                        s_smoothDir = SafeNormalize(s_smoothDir);
+                        // Scaled ray direction vector matching reference implementation:
+                        // RayDir has exact magnitude of distance to target, terminating directly on head.
+                        Vector3 finalRayDir(s_smoothDir.x * targetDist,
+                                           s_smoothDir.y * targetDist,
+                                           s_smoothDir.z * targetDist);
 
-                        // ── NATURAL AIM DIRECTION (CAMERA-COMPLIANT WRITE) ───────────
-                        wpm<Vector3>(dirAddr, s_smoothDir);
+                        wpm<Vector3>(dirAddr, finalRayDir);
                         wpm<bool>(aimInfo + 0x71, false);
-
-                        // NOTE [CRITICAL ANTI-BLACKLIST FIX]:
-                        // NEVER write to enemy memory (ColWrite / HeadCollider)!
-                        // Overwriting enemy hitbox pointers triggers instant server-side collision
-                        // audit mismatches and places accounts in blacklist matchmaking.
-                        // We achieve natural aim connection strictly via client trajectory (dirAddr).
-                        (void)lockToHead;
-
-                        // NOTE [RECOIL]:
-                        // The game's own recoil is intentionally left alone. No recoil
-                        // field is read, scaled or written. Only the bullet direction
-                        // above is steered; everything downstream is the game's.
                     }
                 }
             }

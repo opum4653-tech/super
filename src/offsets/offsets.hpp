@@ -47,7 +47,8 @@ namespace Offsets {
         constexpr uintptr_t Armor                = 0x74;    // Int32
         constexpr uintptr_t IsDead               = 0x7C;    // Boolean
         constexpr uintptr_t Avatar               = 0x770;   // AvatarManager
-        constexpr uintptr_t HeadCollider         = 0x738;   // Collider
+        constexpr uintptr_t HeadCollider         = 0x738;   // Collider (0x738 in FF Global, 0x740 in FF Max)
+        constexpr uintptr_t LockedAimingCollider = 0x80;    // Collider on AttackableEntity
         constexpr uintptr_t IsBot                = 0x4A0;   // Boolean
         constexpr uintptr_t Name                 = 0x490;   // MonoString*
         constexpr uintptr_t Speed                = 0x560;   // Single (Default 1.0f)
@@ -146,6 +147,8 @@ namespace Offsets {
     constexpr uintptr_t Player_Armor             = Player::Armor;
     constexpr uintptr_t Player_IsDead            = Player::IsDead;
     constexpr uintptr_t Player_Avatar            = Player::Avatar;
+    constexpr uintptr_t Player_HeadCollider         = Player::HeadCollider;
+    constexpr uintptr_t Player_LockedAimingCollider = Player::LockedAimingCollider;
     constexpr uintptr_t Player_IsBot             = Player::IsBot;
     constexpr uintptr_t Player_Name              = Player::Name;
     constexpr uintptr_t Player_Speed             = Player::Speed;
