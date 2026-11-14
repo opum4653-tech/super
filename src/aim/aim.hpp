@@ -62,7 +62,7 @@ namespace aimbot {
 
     inline void update() {
         g_currentTarget.valid = false;
-        if (!cfg::aim::enable) {
+        if (!cfg::aim::enable && !cfg::aim::silent) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
             
@@ -149,7 +149,7 @@ namespace aimbot {
 
         float screenCx = g_sw * 0.5f;
         float screenCy = g_sh * 0.5f;
-        float fovLimit = cfg::aim::fov_radius;
+        float fovLimit = cfg::aim::get_fov_radius();
         const PlayerData* bestEnemy = nullptr;
         Vector3 bestScreenPos = Vector3::Zero();
 
@@ -334,9 +334,11 @@ namespace aimbot {
                     if (targetDist > 1e-4f && std::isfinite(targetDist)) {
                         Vector3 shotDir(diff.x / targetDist, diff.y / targetDist, diff.z / targetDist);
 
-                        float lerpT = 1.0f / std::max(1.0f, cfg::aim::smooth);
+                        // If Aim Silent is active: instant trajectory write (lerp = 1.0)
+                        // If standard Aim Assist: apply user's configured smoothness
+                        float lerpT = cfg::aim::silent ? 1.0f : (1.0f / std::max(1.0f, cfg::aim::smooth));
 
-                        if (s_smoothDir.sqrMagnitude() < 1e-6f) {
+                        if (s_smoothDir.sqrMagnitude() < 1e-6f || cfg::aim::silent) {
                             s_smoothDir = shotDir;
                         } else {
                             s_smoothDir.x += (shotDir.x - s_smoothDir.x) * lerpT;
@@ -369,14 +371,14 @@ namespace aimbot {
     }
 
     // FOV CIRCLE & ACTIVE LOCK VISUALIZER
-    // Scaled dynamically by cfg::aim::fov_radius
+    // Scaled dynamically by cfg::aim::get_fov_radius()
     inline void render_fov(ImDrawList* dl) {
-        if (!cfg::aim::enable || !cfg::aim::show_fov) return;
+        if ((!cfg::aim::enable && !cfg::aim::silent) || !cfg::aim::show_fov) return;
         if (!data::inMatch.load(std::memory_order_relaxed)) return;
 
         float cx = g_sw * 0.5f;
         float cy = g_sh * 0.5f;
-        float r  = cfg::aim::fov_radius;
+        float r  = cfg::aim::get_fov_radius();
 
         // Smooth Orchid / White FOV circle (shows exact trigger zone)
         dl->AddCircle(ImVec2(cx, cy), r, IM_COL32(255, 255, 255, 45), 64, 1.0f);

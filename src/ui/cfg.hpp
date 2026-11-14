@@ -1,6 +1,8 @@
 #pragma once
 #include "imgui.h"
 
+extern float g_sw;
+
 namespace cfg {
 namespace esp {
 // Master
@@ -38,11 +40,13 @@ namespace esp {
 
 namespace aim {
     inline int   read_interval_ms = 16;   // Read loop cadence (ms). Higher = lower syscall frequency.
-    inline bool  enable           = false;
+    inline bool  enable           = false; // Traditional Aim Assist
+    inline bool  silent           = false; // Aim Silent: direct ray trajectory steering, zero camera movement
     inline bool  scope_aim        = false; // Off by default. Enabling adds a write path on scope.
     inline bool  sniper_aim       = false; // Off by default. Enabling forces head lock, ignoring headshot_rate.
     inline bool  show_fov         = false;
-    inline float fov_radius       = 180.0f;
+    inline float aim_fov          = 35.0f;  // AimFov (0° - 180°), matching reference calculation
+    inline float fov_radius       = 180.0f; // Fallback pixel radius
     inline float smooth           = 5.0f;   // Safe default: smooth lerp (1=snap, 10=slow). Range 3-8 looks natural.
     inline float headshot_rate    = 0.0f;   // 0% default = no head targeting until raised in menu.
     inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
@@ -50,10 +54,17 @@ namespace aim {
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
     inline bool  ignore_bots      = false;
     inline float max_distance     = 200.0f;
+
+    inline float get_fov_radius() {
+        if (aim_fov > 0.0f && g_sw > 0.0f) {
+            return (aim_fov / 180.0f) * (g_sw * 0.55f);
+        }
+        return fov_radius;
+    }
 }
 
 inline bool any_feature_enabled() {
-    return aim::enable || esp::box || esp::health || esp::armor ||
+    return aim::enable || aim::silent || esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair || esp::firing_ind;
 }

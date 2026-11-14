@@ -632,6 +632,7 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Aimbot", ui_scale);
                     DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
+                    DrawToggleSwitch("Aim Silent", &cfg::aim::silent, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Aimbot Enable", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Scope Aim (Head Lock)", &cfg::aim::scope_aim, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Sniper Headshot Lock", &cfg::aim::sniper_aim, 48.0f * ui_scale, ui_scale);
@@ -639,8 +640,13 @@ namespace ui::menu {
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
-                    DrawSectionHeader(cdl, "FOV & Smooth Settings", ui_scale);
+                    DrawSectionHeader(cdl, "FOV & Target Settings", ui_scale);
 
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##AimFov", &cfg::aim::aim_fov, 5.0f, 180.0f, "%.0f deg");
+                    ImGui::TextDisabled("AimFov (0 - 180)");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* triggerModes[] = { "When Firing", "Always In FOV" };
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##AimTrigger", &cfg::aim::trigger_mode, triggerModes, 2);
@@ -656,11 +662,6 @@ namespace ui::menu {
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##HeadshotRate", &cfg::aim::headshot_rate, 0.0f, 100.0f, "%.0f%%");
                     ImGui::TextDisabled("Headshot Rate (0%% - 100%%)");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##FovRadius", &cfg::aim::fov_radius, 30.0f, 650.0f, "%.0f px");
-                    ImGui::TextDisabled("FOV Circle Radius");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
