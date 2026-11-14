@@ -58,6 +58,19 @@ namespace Offsets {
         constexpr uintptr_t FOVOffset            = 0x84;    // Single
         constexpr uintptr_t Weapon               = 0x600;   // WeaponOnHand
         constexpr uintptr_t DeathInfo            = 0x24A8;  // DeathInfo
+        constexpr uintptr_t Attributes           = 0x768;   // PlayerAttributes (0x768 Global, 0x770 Max)
+        constexpr uintptr_t Attributes_Max       = 0x770;   // PlayerAttributes Max
+        constexpr uintptr_t ForceSpeed           = 0x3C8;   // Single: ForceSetRunAndDashSpeed inside PlayerAttributes
+        constexpr uintptr_t PhantomState         = 0x814;   // Boolean: Ghost / Phantom mode flag on Player
+        constexpr uintptr_t FlightFlag           = 0x2098;  // Boolean: Elevation flight state flag on Player
+    }
+
+// Transform Hierarchy Traversal (Unity Matrix Resolution)
+    namespace Transform {
+        constexpr uintptr_t Node                 = 0x10;    // Transform -> Component / Node
+        constexpr uintptr_t Obj                  = 0x10;    // Node -> TransformObj
+        constexpr uintptr_t MatrixPtr            = 0x38;    // TransformObj -> MatrixPtr
+        constexpr uintptr_t Position             = 0x90;    // MatrixPtr -> Vector3 Position
     }
 
 // Weapon Data Fields
@@ -158,6 +171,16 @@ namespace Offsets {
     constexpr uintptr_t Player_FOVOffset         = Player::FOVOffset;
     constexpr uintptr_t Player_Weapon            = Player::Weapon;
     constexpr uintptr_t Player_DeathInfo         = Player::DeathInfo;
+    constexpr uintptr_t Player_Attributes        = Player::Attributes;
+    constexpr uintptr_t Player_Attributes_Max    = Player::Attributes_Max;
+    constexpr uintptr_t Player_ForceSpeed        = Player::ForceSpeed;
+    constexpr uintptr_t Player_PhantomState      = Player::PhantomState;
+    constexpr uintptr_t Player_FlightFlag        = Player::FlightFlag;
+
+    constexpr uintptr_t Transform_Node           = Transform::Node;
+    constexpr uintptr_t Transform_Obj            = Transform::Obj;
+    constexpr uintptr_t Transform_MatrixPtr      = Transform::MatrixPtr;
+    constexpr uintptr_t Transform_Position       = Transform::Position;
 
     constexpr uintptr_t Avatar_Uma               = Avatar::Uma;
     constexpr uintptr_t Uma_Visible              = Avatar::Uma_Visible;

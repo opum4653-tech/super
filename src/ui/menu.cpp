@@ -29,9 +29,9 @@ static std::atomic<bool> menu_open{false};
 static std::atomic<bool> g_should_exit{false};
 
 // ============================================================================
-// CRACK MASTER OFFICIAL EMERALD / NEON GREEN PALETTE (MATCHING SCREENSHOT)
+// EMERALD / NEON GREEN PALETTE (MATCHING SCREENSHOT)
 // ============================================================================
-namespace theme_crackmaster {
+namespace theme_overlay {
     constexpr ImU32 ColTitleGreen     = IM_COL32(46, 255, 76, 255);    // Bright Neon Green #2EFF4C
     constexpr ImU32 ColActiveTab      = IM_COL32(0, 230, 30, 255);     // Solid Bright Green #00E61E
     constexpr ImU32 ColInactiveTabBg  = IM_COL32(18, 24, 18, 255);     // Dark Greenish Charcoal
@@ -49,11 +49,11 @@ namespace theme_crackmaster {
 }
 
 // ----------------------------------------------------------------------------
-// FLOATING CIRCLE LOGO (CRACK MASTER BRANDING)
+// FLOATING CIRCLE LOGO
 // ----------------------------------------------------------------------------
 static void DrawCircularLogo(ImDrawList* dl, ImVec2 center, float radius, bool spinning = false) {
     (void)spinning;
-    ImU32 colPrimary = theme_crackmaster::ColAccentBar;
+    ImU32 colPrimary = theme_overlay::ColAccentBar;
     ImU32 colDarkBg  = IM_COL32(12, 16, 12, 245);
     ImU32 colWhite   = IM_COL32(255, 255, 255, 255);
 
@@ -139,21 +139,21 @@ static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, flo
 
     if (is_active) {
         // Solid vivid green background
-        dl->AddRectFilled(bMin, bMax, theme_crackmaster::ColActiveTab, rounding);
+        dl->AddRectFilled(bMin, bMax, theme_overlay::ColActiveTab, rounding);
         // Clean bold white text
         ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
         ImVec2 tpos(bMin.x + (size.x - tsz.x) * 0.5f, bMin.y + (size.y - tsz.y) * 0.5f);
-        dl->AddText(font, fontSize, tpos, theme_crackmaster::ColTextWhite, label);
+        dl->AddText(font, fontSize, tpos, theme_overlay::ColTextWhite, label);
     } else {
         // Dark olive background
-        ImU32 bgCol = hovered ? IM_COL32(26, 36, 26, 255) : theme_crackmaster::ColInactiveTabBg;
+        ImU32 bgCol = hovered ? IM_COL32(26, 36, 26, 255) : theme_overlay::ColInactiveTabBg;
         dl->AddRectFilled(bMin, bMax, bgCol, rounding);
         // Subtle border
-        dl->AddRect(bMin, bMax, theme_crackmaster::ColInactiveTabBdr, rounding, 0, 1.2f);
+        dl->AddRect(bMin, bMax, theme_overlay::ColInactiveTabBdr, rounding, 0, 1.2f);
         // Light silver text
         ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
         ImVec2 tpos(bMin.x + (size.x - tsz.x) * 0.5f, bMin.y + (size.y - tsz.y) * 0.5f);
-        dl->AddText(font, fontSize, tpos, hovered ? theme_crackmaster::ColTextWhite : theme_crackmaster::ColTextMuted, label);
+        dl->AddText(font, fontSize, tpos, hovered ? theme_overlay::ColTextWhite : theme_overlay::ColTextMuted, label);
     }
 
     return pressed;
@@ -172,15 +172,15 @@ static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, fl
     ImVec2 bMax(pos.x + size, pos.y + size);
     float rounding = 6.0f * ui_scale;
 
-    ImU32 bgCol = hovered ? IM_COL32(32, 42, 32, 255) : theme_crackmaster::ColTopBtnBg;
+    ImU32 bgCol = hovered ? IM_COL32(32, 42, 32, 255) : theme_overlay::ColTopBtnBg;
     dl->AddRectFilled(bMin, bMax, bgCol, rounding);
-    dl->AddRect(bMin, bMax, theme_crackmaster::ColTopBtnBdr, rounding, 0, 1.2f);
+    dl->AddRect(bMin, bMax, theme_overlay::ColTopBtnBdr, rounding, 0, 1.2f);
 
     ImFont* font = ImGui::GetFont();
     float fontSize = size * 0.55f;
     ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
     ImVec2 tpos(bMin.x + (size - tsz.x) * 0.5f, bMin.y + (size - tsz.y) * 0.5f);
-    dl->AddText(font, fontSize, tpos, theme_crackmaster::ColTextWhite, text);
+    dl->AddText(font, fontSize, tpos, theme_overlay::ColTextWhite, text);
 
     return pressed;
 }
@@ -198,7 +198,7 @@ static void DrawSectionHeader(ImDrawList* dl, const char* label, float ui_scale 
     dl->AddRectFilled(
         ImVec2(cur.x, cur.y + padY),
         ImVec2(cur.x + barW, cur.y + padY + barH),
-        theme_crackmaster::ColAccentBar,
+        theme_overlay::ColAccentBar,
         2.5f
     );
 
@@ -234,7 +234,7 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
     float fontSize = 17.0f * ui_scale;
     ImVec2 tsz = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
     ImVec2 label_pos(curPos.x + 8.0f * ui_scale, curPos.y + (row_height - tsz.y) * 0.5f);
-    dl->AddText(font, fontSize, label_pos, theme_crackmaster::ColTextWhite, label);
+    dl->AddText(font, fontSize, label_pos, theme_overlay::ColTextWhite, label);
 
     // 2. Capsule / Pill switch on the right
     float switchW = 58.0f * ui_scale;
@@ -246,7 +246,7 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
     ImVec2 sMax(sMin.x + switchW, sMin.y + switchH);
 
     // Track color (Solid Green if ON, Dark slate if OFF)
-    ImU32 trackCol = *v ? theme_crackmaster::ColSwitchOnTrack : theme_crackmaster::ColSwitchOffTrack;
+    ImU32 trackCol = *v ? theme_overlay::ColSwitchOnTrack : theme_overlay::ColSwitchOffTrack;
     dl->AddRectFilled(sMin, sMax, trackCol, switchRounding);
 
     // Subtle dark track border when OFF
@@ -259,7 +259,7 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
     float knobX = *v ? (sMax.x - switchRounding) : (sMin.x + switchRounding);
     float knobY = sMin.y + switchRounding;
 
-    dl->AddCircleFilled(ImVec2(knobX, knobY), knobRadius, theme_crackmaster::ColSwitchThumb, 32);
+    dl->AddCircleFilled(ImVec2(knobX, knobY), knobRadius, theme_overlay::ColSwitchThumb, 32);
 
     return pressed;
 }
@@ -341,7 +341,7 @@ namespace ui::menu {
                                        ImGuiWindowFlags_NoBringToFrontOnFocus;
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        if (ImGui::Begin("##CRACKMASTER_FLOATING_CIRCLE", nullptr, circleFlags)) {
+        if (ImGui::Begin("##FLOATING_CIRCLE", nullptr, circleFlags)) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             ImVec2 center = s_circle_pos;
             const ImVec2 mouse = io.MousePos;
@@ -415,7 +415,7 @@ namespace ui::menu {
         }
 
         // ====================================================================
-        // CRACK MASTER MAIN WINDOW — ENLARGED TOUCH GEOMETRY
+        // MAIN OVERLAY WINDOW — ENLARGED TOUCH GEOMETRY
         // ====================================================================
         const float winW = std::max(560.0f * ui_scale, std::min(720.0f * ui_scale, realW * 0.94f));
         const float winH = std::max(440.0f * ui_scale, std::min(590.0f * ui_scale, realH * 0.94f));
@@ -432,7 +432,7 @@ namespace ui::menu {
         ImGui::SetNextWindowSize(ImVec2(winW, winH), ImGuiCond_Always);
         ImGui::SetNextWindowPos(s_menu_pos, ImGuiCond_Always);
 
-        // Styling for CRACK MASTER: Pure Pitch Black & Clean Green Accents
+        // Styling: Pure Pitch Black & Clean Green Accents
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.039f, 0.043f, 0.051f, 0.98f));
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.11f, 0.15f, 0.11f, 0.90f));
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.07f, 0.09f, 0.07f, 1.0f));
@@ -469,7 +469,7 @@ namespace ui::menu {
                                    ImGuiWindowFlags_NoResize |
                                    ImGuiWindowFlags_NoScrollbar;
 
-        if (ImGui::Begin("##CRACK_MASTER_WINDOW", nullptr, winFlags)) {
+        if (ImGui::Begin("##MAIN_OVERLAY_WINDOW", nullptr, winFlags)) {
             ImDrawList* dl = ImGui::GetWindowDrawList();
             ImVec2 curWinPos = ImGui::GetWindowPos();
             ImVec2 curWinSize = ImGui::GetWindowSize();
@@ -486,7 +486,7 @@ namespace ui::menu {
             ImVec2 titleSz = font->CalcTextSizeA(titleFontSize, FLT_MAX, 0.0f, brandTitle);
             float titleX = curWinPos.x + (curWinSize.x - titleSz.x) * 0.5f;
             float titleY = curWinPos.y + (headerH - titleSz.y) * 0.5f;
-            dl->AddText(font, titleFontSize, ImVec2(titleX, titleY), theme_crackmaster::ColTitleGreen, brandTitle);
+            dl->AddText(font, titleFontSize, ImVec2(titleX, titleY), theme_overlay::ColTitleGreen, brandTitle);
 
             // Drag area across header (except right buttons)
             const float btnSize = 32.0f * ui_scale;
@@ -512,17 +512,17 @@ namespace ui::menu {
             ImGui::SetCursorScreenPos(ImVec2(curWinPos.x + 14.0f * ui_scale, curWinPos.y + headerH));
 
             // ----------------------------------------------------------------
-            // 2. HORIZONTAL NAVIGATION TABS: [ Info ] [ Visual ] [ Aimbot ] [ Settings ]
+            // 2. HORIZONTAL NAVIGATION TABS: [ Info ] [ Visual ] [ Aimbot ] [ Motion ] [ Settings ]
             // ----------------------------------------------------------------
             const float tabPadX = 14.0f * ui_scale;
             const float tabGap  = 8.0f * ui_scale;
-            const float tabW    = (curWinSize.x - tabPadX * 2.0f - tabGap * 3.0f) / 4.0f;
+            const float tabW    = (curWinSize.x - tabPadX * 2.0f - tabGap * 4.0f) / 5.0f;
             const float tabH    = 44.0f * ui_scale;
 
-            const char* tabNames[] = { "Info", "Visual", "Aimbot", "Settings" };
+            const char* tabNames[] = { "Info", "Visual", "Aimbot", "Motion", "Settings" };
 
             ImGui::SetCursorPos(ImVec2(tabPadX, headerH));
-            for (int i = 0; i < 4; ++i) {
+            for (int i = 0; i < 5; ++i) {
                 if (i > 0) ImGui::SameLine(0, tabGap);
                 if (DrawTopTabButton(tabNames[i], (activeTab == i), ImVec2(tabW, tabH), ui_scale)) {
                     activeTab = i;
@@ -541,7 +541,7 @@ namespace ui::menu {
 
             ImGui::SetCursorPos(ImVec2(contentPadX, contentY));
 
-            if (ImGui::BeginChild("##CrackMasterContent", ImVec2(contentW, contentH), false, ImGuiWindowFlags_NoScrollbar)) {
+            if (ImGui::BeginChild("##MainContent", ImVec2(contentW, contentH), false, ImGuiWindowFlags_NoScrollbar)) {
                 ImDrawList* cdl = ImGui::GetWindowDrawList();
 
                 // Style scaling for sliders, combo dropdowns and option controls
@@ -671,9 +671,33 @@ namespace ui::menu {
                     handleTouchScroll();
                 }
                 // ============================================================
-                // TAB 3: SETTINGS
+                // TAB 3: MOTION
                 // ============================================================
                 else if (activeTab == 3) {
+                    DrawSectionHeader(cdl, "Motion", ui_scale);
+                    DrawSectionHeader(cdl, "Player Movement Modifiers", ui_scale);
+
+                    DrawToggleSwitch("Air Flight", &cfg::motion::air_flight, 48.0f * ui_scale, ui_scale);
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##FlightHeight", &cfg::motion::flight_height, 1.0f, 15.0f, "%.1f m");
+                    ImGui::TextDisabled("Flight Elevation Height");
+
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    DrawToggleSwitch("Sprint Boost", &cfg::motion::sprint_boost, 48.0f * ui_scale, ui_scale);
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##SprintSpeed", &cfg::motion::sprint_speed, 1.0f, 15.0f, "%.1f x");
+                    ImGui::TextDisabled("Sprint Velocity Multiplier");
+
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    DrawToggleSwitch("Phantom Mode", &cfg::motion::phantom_mode, 48.0f * ui_scale, ui_scale);
+                    ImGui::TextDisabled("Ghost / Phantom State Override");
+
+                    handleTouchScroll();
+                }
+                // ============================================================
+                // TAB 4: SETTINGS
+                // ============================================================
+                else if (activeTab == 4) {
                     DrawSectionHeader(cdl, "Settings", ui_scale);
                     DrawSectionHeader(cdl, "Menu Preferences", ui_scale);
 

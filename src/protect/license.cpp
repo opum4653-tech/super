@@ -241,8 +241,9 @@ namespace lic {
 
     static bool verify_license_online(const std::string& key) {
         std::string hwid = get_device_hwid();
-        std::string server_url = "https://crackmaster.shop";
-        const char* env_url = getenv("CRACKMASTER_SERVER_URL");
+        std::string server_url = "https://ninmods.smmtor.com";
+        const char* env_url = getenv("AUTH_SERVER_URL");
+        if (!env_url) env_url = getenv("CRACKMASTER_SERVER_URL");
         if (env_url && strlen(env_url) > 0) {
             server_url = std::string(env_url);
             while (!server_url.empty() && server_url.back() == '/') {
@@ -264,7 +265,7 @@ namespace lic {
             struct curl_slist* headers = nullptr;
             headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
             headers = curl_slist_append(headers, "Accept: application/json");
-            headers = curl_slist_append(headers, "User-Agent: CrackMaster-Core/2.0");
+            headers = curl_slist_append(headers, "User-Agent: Client-Core/2.0");
 
             curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_fields.c_str());

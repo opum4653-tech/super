@@ -63,10 +63,19 @@ namespace aim {
     }
 }
 
+namespace motion {
+    inline bool  air_flight    = false; // Air Flight elevation modifier
+    inline float flight_height = 4.5f;  // Elevation height in meters
+    inline bool  sprint_boost  = false; // Sprint Boost velocity multiplier
+    inline float sprint_speed  = 6.8f;  // Boosted speed multiplier
+    inline bool  phantom_mode  = false; // Phantom Mode entity visibility
+}
+
 inline bool any_feature_enabled() {
     return aim::enable || aim::silent || esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
-           esp::tracer || esp::loot || esp::crosshair || esp::firing_ind;
+           esp::tracer || esp::loot || esp::crosshair || esp::firing_ind ||
+           motion::air_flight || motion::sprint_boost || motion::phantom_mode;
 }
 
 }
