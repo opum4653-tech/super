@@ -19,7 +19,17 @@
 
 namespace aimbot {
 
+    inline std::atomic<bool>& aim_thread_running() {
+        static std::atomic<bool> s_run{false};
+        return s_run;
+    }
+
     inline void update() {
+        if (!cfg::master_enabled) {
+            motion::reset();
+            return;
+        }
+
         // Run motion enhancement updates
         motion::update();
 
@@ -63,6 +73,36 @@ namespace aimbot {
 
         // 3D Silent bullet trajectory steering
         apply_trajectory(localPlayer, acq.target, lockToHead);
+    }
+
+    inline void loop() {
+        while (aim_thread_running().load(std::memory_order_relaxed)) {
+            if (cfg::master_enabled && (cfg::aim::enable || cfg::aim::silent || cfg::motion::air_flight || cfg::motion::phantom_mode)) {
+                update();
+            }
+
+            uint64_t lp = data::localPlayerAddr.load(std::memory_order_relaxed);
+            bool isFiring = false;
+            if (lp) {
+                isFiring = rpm<bool>(lp + Offsets::Player::IsFiring) || rpm<bool>(lp + 0x850);
+            }
+
+            if (isFiring) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
+    }
+
+    inline void thread_start() {
+        if (aim_thread_running().exchange(true)) return;
+        std::thread(loop).detach();
+    }
+
+    inline void thread_stop() {
+        aim_thread_running().store(false);
+        motion::reset();
     }
 
 } // namespace aimbot

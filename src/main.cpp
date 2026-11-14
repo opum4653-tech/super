@@ -9,6 +9,7 @@
 #include "game/data.hpp"
 #include "game/Offsets.h"
 #include "func/esp.hpp"
+#include "func/aim/aim.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -144,12 +145,14 @@ static int start_overlay() {
                     uint32_t elfMagic = rpm<uint32_t>(proc::lib);
                     if (elfMagic == 0x464C457F) {
                         data::thread_start();
+                        aimbot::thread_start();
 
                         // Monitor target lifecycle during active gameplay.
                         // Orientation is tracked by the render loop, which already
                         // sees every transition; nothing to poll for here.
                         while (main_thread_flag) {
                             if (get_pid() <= 0) {
+                                aimbot::thread_stop();
                                 data::thread_stop();
                                 break;
                             }

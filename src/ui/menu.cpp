@@ -509,19 +509,49 @@ namespace ui::menu {
                 menu_open = false;
             }
 
-            ImGui::SetCursorScreenPos(ImVec2(curWinPos.x + 14.0f * ui_scale, curWinPos.y + headerH));
+            // ----------------------------------------------------------------
+            // 1.5. GLOBAL MASTER SWITCH BAR (SUPPRESSES / ACTIVATES ALL FEATURES)
+            // ----------------------------------------------------------------
+            const float tabPadX = 14.0f * ui_scale;
+            const float masterBarH = 40.0f * ui_scale;
+            const float masterY = headerH;
+
+            ImVec2 mBarMin = ImVec2(curWinPos.x + tabPadX, curWinPos.y + masterY);
+            ImVec2 mBarMax = ImVec2(curWinPos.x + curWinSize.x - tabPadX, mBarMin.y + masterBarH);
+            ImU32 mBarBg = cfg::master_enabled ? IM_COL32(18, 38, 26, 230) : IM_COL32(32, 22, 24, 230);
+            ImU32 mBarBorder = cfg::master_enabled ? IM_COL32(0, 255, 128, 140) : IM_COL32(255, 75, 75, 110);
+            dl->AddRectFilled(mBarMin, mBarMax, mBarBg, 10.0f * ui_scale);
+            dl->AddRect(mBarMin, mBarMax, mBarBorder, 10.0f * ui_scale, 0, 1.2f);
+
+            // Active glowing dot
+            float dotRadius = 4.5f * ui_scale;
+            ImVec2 dotCenter = ImVec2(mBarMin.x + 16.0f * ui_scale, mBarMin.y + masterBarH * 0.5f);
+            ImU32 dotCol = cfg::master_enabled ? IM_COL32(0, 255, 128, 255) : IM_COL32(255, 75, 75, 255);
+            dl->AddCircleFilled(dotCenter, dotRadius, dotCol, 16);
+
+            const char* mStatusText = cfg::master_enabled ? "MASTER: ACTIVE" : "MASTER: PAUSED (Suppressed)";
+            ImU32 mStatusCol = cfg::master_enabled ? theme_overlay::ColAccent : IM_COL32(230, 100, 100, 255);
+            dl->AddText(font, 13.0f * ui_scale, ImVec2(mBarMin.x + 28.0f * ui_scale, mBarMin.y + (masterBarH - 13.0f * ui_scale) * 0.5f), mStatusCol, mStatusText);
+
+            // Large interactive Toggle on right side of the master bar
+            ImGui::SetCursorPos(ImVec2(tabPadX + 4.0f * ui_scale, masterY + 2.0f * ui_scale));
+            if (DrawToggleSwitch("##MasterGlobalSwitch", &cfg::master_enabled, mBarMax.x - mBarMin.x - 8.0f * ui_scale, ui_scale)) {
+                if (!cfg::master_enabled) {
+                    func::aim::motion::reset();
+                }
+            }
 
             // ----------------------------------------------------------------
             // 2. HORIZONTAL NAVIGATION TABS: [ Info ] [ Visual ] [ Aimbot ] [ Motion ] [ Settings ]
             // ----------------------------------------------------------------
-            const float tabPadX = 14.0f * ui_scale;
             const float tabGap  = 8.0f * ui_scale;
             const float tabW    = (curWinSize.x - tabPadX * 2.0f - tabGap * 4.0f) / 5.0f;
-            const float tabH    = 44.0f * ui_scale;
+            const float tabH    = 42.0f * ui_scale;
+            const float tabsY   = masterY + masterBarH + 8.0f * ui_scale;
 
             const char* tabNames[] = { "Info", "Visual", "Aimbot", "Motion", "Settings" };
 
-            ImGui::SetCursorPos(ImVec2(tabPadX, headerH));
+            ImGui::SetCursorPos(ImVec2(tabPadX, tabsY));
             for (int i = 0; i < 5; ++i) {
                 if (i > 0) ImGui::SameLine(0, tabGap);
                 if (DrawTopTabButton(tabNames[i], (activeTab == i), ImVec2(tabW, tabH), ui_scale)) {
@@ -529,13 +559,11 @@ namespace ui::menu {
                 }
             }
 
-            ImGui::Dummy(ImVec2(0, 12.0f * ui_scale));
-
             // ----------------------------------------------------------------
             // 3. MAIN CONTENT BODY AREA
             // ----------------------------------------------------------------
             const float contentPadX = tabPadX;
-            const float contentY = headerH + tabH + 14.0f * ui_scale;
+            const float contentY = tabsY + tabH + 10.0f * ui_scale;
             const float contentW = curWinSize.x - contentPadX * 2.0f;
             const float contentH = curWinSize.y - contentY - 8.0f * ui_scale;
 
@@ -682,13 +710,7 @@ namespace ui::menu {
                     ImGui::SliderFloat("##FlightHeight", &cfg::motion::flight_height, 1.0f, 15.0f, "%.1f m");
                     ImGui::TextDisabled("Flight Elevation Height");
 
-                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawToggleSwitch("Sprint Boost", &cfg::motion::sprint_boost, 48.0f * ui_scale, ui_scale);
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##SprintSpeed", &cfg::motion::sprint_speed, 1.0f, 15.0f, "%.1f x");
-                    ImGui::TextDisabled("Sprint Velocity Multiplier");
-
-                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
                     DrawToggleSwitch("Phantom Mode", &cfg::motion::phantom_mode, 48.0f * ui_scale, ui_scale);
                     ImGui::TextDisabled("Ghost / Phantom State Override");
 

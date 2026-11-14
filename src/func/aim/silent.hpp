@@ -3,20 +3,21 @@
 
 namespace aimbot {
 
-    // 3D Silent trajectory calculation and steering
-    // Steers the client-side bullet trajectory towards target without touching camera rotation
+    // 3D Silent bullet trajectory calculation and steering (matching STORM_MODS)
+    // Directly steers client-side bullet trajectory without touching camera rotation or weapon recoil.
     inline void apply_trajectory(uint64_t localPlayer, const PlayerData& target, bool lockToHead) {
         if (!is_valid_ptr(localPlayer)) return;
 
-        uint64_t aimInfo = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo);
-        if (!is_valid_ptr(aimInfo)) {
-            aimInfo = rpm<uint64_t>(localPlayer + 0xE58);
-        }
+        // Dual resolution: Weapon AimingInfo (0xE58) and Auxiliary AimingInfo (0xE50)
+        uint64_t aimInfoWeapon = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo);     // 0xE58
+        uint64_t aimInfoAux    = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo_Alt); // 0xE50
 
-        if (!is_valid_ptr(aimInfo)) return;
+        if (!is_valid_ptr(aimInfoWeapon) && !is_valid_ptr(aimInfoAux)) return;
 
-        uint64_t dirAddr = aimInfo + Offsets::Aim::Direction;
-        Vector3 bulletOrigin = rpm<Vector3>(aimInfo + Offsets::Aim::StartPosition);
+        uint64_t primaryAimInfo = is_valid_ptr(aimInfoWeapon) ? aimInfoWeapon : aimInfoAux;
+
+        // Read start position (0x4C). Fall back to head position if uninitialized.
+        Vector3 bulletOrigin = rpm<Vector3>(primaryAimInfo + Offsets::Aim::StartPosition);
         if (bulletOrigin == Vector3::Zero() || bulletOrigin.sqrMagnitude() < 0.01f) {
             uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
             if (localHead) bulletOrigin = GetNodePosition(localHead);
@@ -32,9 +33,8 @@ namespace aimbot {
             target3D.y -= 0.40f; // Body / Pelvis
         } else {
             if (!lockToHead) {
-                target3D.y -= 0.30f; // Body / Chest on non-headshot rolls
+                target3D.y -= 0.28f; // Chest on non-headshot rolls
             }
-            // Direct head targeting (0.00m offset) when lockToHead is true
         }
 
         if (!std::isfinite(bulletOrigin.x) ||
@@ -44,37 +44,21 @@ namespace aimbot {
             return;
         }
 
-        Vector3 diff = target3D - bulletOrigin;
-        float targetDist = sqrtf(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+        // Direct trajectory vector (dir = targetPos - startPos, matching reference engine)
+        Vector3 dir = target3D - bulletOrigin;
+        if (dir.sqrMagnitude() <= 1e-4f) return;
 
-        if (targetDist <= 1e-4f || !std::isfinite(targetDist)) return;
-
-        Vector3 shotDir(diff.x / targetDist, diff.y / targetDist, diff.z / targetDist);
-
-        // Instant trajectory write on Aim Silent (lerp = 1.0); smooth lerp on standard aim assist
-        float lerpT = cfg::aim::silent ? 1.0f : (1.0f / std::max(1.0f, cfg::aim::smooth));
-
-        if (s_smoothDir.sqrMagnitude() < 1e-6f || cfg::aim::silent) {
-            s_smoothDir = shotDir;
-        } else {
-            s_smoothDir.x += (shotDir.x - s_smoothDir.x) * lerpT;
-            s_smoothDir.y += (shotDir.y - s_smoothDir.y) * lerpT;
-            s_smoothDir.z += (shotDir.z - s_smoothDir.z) * lerpT;
-            float smLen = sqrtf(s_smoothDir.x * s_smoothDir.x + s_smoothDir.y * s_smoothDir.y + s_smoothDir.z * s_smoothDir.z);
-            if (smLen > 1e-4f) {
-                s_smoothDir.x /= smLen;
-                s_smoothDir.y /= smLen;
-                s_smoothDir.z /= smLen;
-            }
+        // Write directly to LastAimingInfoFromWeapon (0xE58 + 0x40)
+        if (is_valid_ptr(aimInfoWeapon)) {
+            wpm<Vector3>(aimInfoWeapon + Offsets::Aim::Direction, dir);
         }
 
-        // Distance-scaled ray direction: ray terminates directly at target contact position
-        Vector3 finalRayDir(s_smoothDir.x * targetDist,
-                           s_smoothDir.y * targetDist,
-                           s_smoothDir.z * targetDist);
-
-        wpm<Vector3>(dirAddr, finalRayDir);
-        wpm<bool>(aimInfo + 0x71, false);
+        // Also write to Auxiliary AimingInfo (0xE50 + 0x40) if registered
+        if (is_valid_ptr(aimInfoAux) && aimInfoAux != aimInfoWeapon) {
+            wpm<Vector3>(aimInfoAux + Offsets::Aim::Direction, dir);
+        }
     }
+
+} // namespace aimbot
 
 } // namespace aimbot

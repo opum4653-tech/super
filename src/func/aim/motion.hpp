@@ -6,10 +6,6 @@ namespace aimbot::motion {
     inline float s_flightGroundY = 0.0f;
     inline bool  s_flightActive = false;
 
-    inline float s_origSpeed = 0.0f;
-    inline bool  s_origSpeedRead = false;
-    inline bool  s_sprintActive = false;
-
     inline bool  s_phantomActive = false;
 
     inline uintptr_t get_root_pos_addr(uint64_t player) {
@@ -32,25 +28,16 @@ namespace aimbot::motion {
         return matrixPtr + Offsets::Transform::Position;
     }
 
-    inline void reset(uint64_t player) {
+    inline void reset(uint64_t player = 0) {
+        if (!player && data::localPlayerAddr.load(std::memory_order_relaxed)) {
+            player = data::localPlayerAddr.load(std::memory_order_relaxed);
+        }
         if (s_flightActive) {
             s_flightActive = false;
             s_flightGroundY = 0.0f;
             if (is_valid_ptr(player)) {
                 wpm<bool>(player + Offsets::Player::FlightFlag, false);
             }
-        }
-        if (s_sprintActive) {
-            if (is_valid_ptr(player) && s_origSpeedRead && s_origSpeed > 0.0f) {
-                uintptr_t attrs = rpm<uintptr_t>(player + Offsets::Player::Attributes);
-                if (!is_valid_ptr(attrs)) attrs = rpm<uintptr_t>(player + Offsets::Player::Attributes_Max);
-                if (is_valid_ptr(attrs)) {
-                    wpm<float>(attrs + Offsets::Player::ForceSpeed, s_origSpeed);
-                }
-            }
-            s_sprintActive = false;
-            s_origSpeedRead = false;
-            s_origSpeed = 0.0f;
         }
         if (s_phantomActive) {
             s_phantomActive = false;
@@ -61,6 +48,11 @@ namespace aimbot::motion {
     }
 
     inline void update() {
+        if (!cfg::master_enabled) {
+            reset();
+            return;
+        }
+
         if (!data::inMatch.load(std::memory_order_relaxed)) {
             reset(0);
             return;
@@ -93,35 +85,7 @@ namespace aimbot::motion {
             wpm<bool>(localPlayer + Offsets::Player::FlightFlag, false);
         }
 
-        // 2. SPRINT BOOST
-        uintptr_t attrs = rpm<uintptr_t>(localPlayer + Offsets::Player::Attributes);
-        if (!is_valid_ptr(attrs)) {
-            attrs = rpm<uintptr_t>(localPlayer + Offsets::Player::Attributes_Max);
-        }
-        if (is_valid_ptr(attrs)) {
-            if (cfg::motion::sprint_boost) {
-                if (!s_origSpeedRead) {
-                    s_origSpeed = rpm<float>(attrs + Offsets::Player::ForceSpeed);
-                    if (s_origSpeed > 0.1f && s_origSpeed < 50.0f) {
-                        s_origSpeedRead = true;
-                    } else {
-                        s_origSpeed = 1.0f;
-                        s_origSpeedRead = true;
-                    }
-                }
-                wpm<float>(attrs + Offsets::Player::ForceSpeed, cfg::motion::sprint_speed);
-                s_sprintActive = true;
-            } else if (s_sprintActive) {
-                if (s_origSpeedRead && s_origSpeed > 0.0f) {
-                    wpm<float>(attrs + Offsets::Player::ForceSpeed, s_origSpeed);
-                }
-                s_sprintActive = false;
-                s_origSpeedRead = false;
-                s_origSpeed = 0.0f;
-            }
-        }
-
-        // 3. PHANTOM MODE
+        // 2. PHANTOM MODE
         if (cfg::motion::phantom_mode) {
             wpm<bool>(localPlayer + Offsets::Player::PhantomState, true);
             s_phantomActive = true;

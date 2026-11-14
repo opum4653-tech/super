@@ -6,6 +6,7 @@ namespace aimbot {
     // FOV CIRCLE & ACTIVE TARGET LOCK VISUALIZER
     // Scaled dynamically by cfg::aim::get_fov_radius()
     inline void render_fov(ImDrawList* dl) {
+        if (!cfg::master_enabled) return;
         if ((!cfg::aim::enable && !cfg::aim::silent) || !cfg::aim::show_fov) return;
         if (!data::inMatch.load(std::memory_order_relaxed)) return;
 
