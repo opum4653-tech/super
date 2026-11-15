@@ -3,7 +3,6 @@
 #include "ui/menu.hpp"
 #include "protect/license.hpp"
 #include "other/memory.hpp"
-#include "other/crash_handler.hpp"
 #include "other/display_manager.hpp"
 #include "other/settings_guard.hpp"
 #include "game/data.hpp"
@@ -234,10 +233,6 @@ static bool self_is_traced() {
 }
 
 int main(int argc, char** argv) {
-    // 0. Install crash interception handler
-    crash_guard::install();
-    crash_guard::set_cleanup(settings_guard::restore);
-
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
