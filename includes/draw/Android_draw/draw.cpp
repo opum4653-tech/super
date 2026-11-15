@@ -69,8 +69,6 @@ bool initGUI_draw(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
 bool init_egl(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
     ::native_window = android::ANativeWindowCreator::Create("SurfaceView", _screen_x, _screen_y, false, false);
     if (!::native_window) {
-        printf("[-] Failed to create native surface window (SurfaceComposer returned null)\n");
-        fflush(stdout);
         return false;
     }
 
@@ -78,13 +76,9 @@ bool init_egl(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
     if (g_fn_anw_acquire) g_fn_anw_acquire(native_window);
     display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (display == EGL_NO_DISPLAY) {
-        printf("[-] eglGetDisplay failed\n");
-        fflush(stdout);
         return false;
     }
     if (eglInitialize(display, 0, 0) != EGL_TRUE) {
-        printf("[-] eglInitialize failed\n");
-        fflush(stdout);
         return false;
     }
     EGLint num_config = 0;
@@ -113,8 +107,6 @@ bool init_egl(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
             EGL_NONE
         };
         if (eglChooseConfig(display, fallbackAttribList, &config, 1, &num_config) != EGL_TRUE || num_config <= 0) {
-            printf("[-] eglChooseConfig failed\n");
-            fflush(stdout);
             return false;
         }
     }
@@ -126,26 +118,16 @@ bool init_egl(uint32_t _screen_x, uint32_t _screen_y, bool log, bool hide) {
         const EGLint gles2_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
         context = eglCreateContext(display, config, EGL_NO_CONTEXT, gles2_attribs);
         if (context == EGL_NO_CONTEXT) {
-            printf("[-] eglCreateContext failed\n");
-            fflush(stdout);
             return false;
         }
     }
     surface = eglCreateWindowSurface(display, config, native_window, nullptr);
     if (surface == EGL_NO_SURFACE) {
-        EGLint err = eglGetError();
-        printf("[-] eglCreateWindowSurface failed (0x%x)\n", err);
-        fflush(stdout);
         return false;
     }
     if (!eglMakeCurrent(display, surface, surface, context)) {
-        EGLint err = eglGetError();
-        printf("[-] eglMakeCurrent failed (0x%x)\n", err);
-        fflush(stdout);
         return false;
     }
-    printf("[+] Native overlay surface created successfully!\n");
-    fflush(stdout);
     return true;
 }
 

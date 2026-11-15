@@ -22,14 +22,12 @@ static void run_cleanup() {
 // of what failed. debuggerd never sees the signal because it is caught here, so
 // no tombstone is produced either.
 static void fatal_handler(int sig, siginfo_t* info, void* context) {
+    (void)sig;
     (void)info;
     (void)context;
 
-    fprintf(stderr, "[-] native fault (%d)\n", sig);
-    fflush(stderr);
-
     run_cleanup();
-    _exit(0);                       // exit 0 keeps the terminal free of signal reports
+    _exit(0);
 }
 
 // SIGTERM / SIGINT / SIGHUP: restore state and leave. No output at all — a

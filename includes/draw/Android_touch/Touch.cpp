@@ -369,7 +369,6 @@ bool Touch_Init(int w, int h, uint32_t orientation_, bool readOnly) {
     }
 
     if (fdNum == 0) {
-        puts("[-] Failed to find touchscreen device in /dev/input/");
         return false;
     }
 
