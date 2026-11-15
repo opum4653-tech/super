@@ -55,7 +55,7 @@ src/game/player.hpp     player record shape
 src/game/Offsets.h      small offset constants
 src/offsets/offsets.hpp the main offset table
 src/other/memory.hpp    process attach, RPM/WPM, module base
-src/other/display_manager.*, settings_guard.hpp, crash_handler.*, utils.hpp, vector3.h
+src/other/display_manager.*, settings_guard.hpp, utils.hpp, vector3.h
 src/protect/license.cpp license validation (network, RAM-only)
 src/protect/oxorany.*   compile-time string obfuscation
 src/ui/menu.cpp         ImGui menu, config binding
@@ -82,9 +82,7 @@ jni/minitouch/          touch injection
   if you ship a bare constant, say which build it was taken from.
 - Every `OpenProcess` handle, `mmap`/`malloc`, and thread gets a paired release on
   the failure path, not only the success path.
-- Use the existing helpers: `memory.hpp` for read/write, plain `printf` to stdout
-  for output (there is no logger and no log file),
-  `crash_handler` for SEH/signal capture. Do not add a second memory layer.
+- Use the existing helpers: `memory.hpp` for read/write, stdout for launcher handshakes (there is no logger and no log file). Do not add a second memory layer.
 - Strings that must not appear in the binary go through `oxorany`.
   Do not put license endpoints, keys, or paths in plain literals.
 - UI code lives in `src/ui`. Do not add ImGui calls from `src/game` or `src/aim`;
