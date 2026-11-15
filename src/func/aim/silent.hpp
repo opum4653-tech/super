@@ -3,31 +3,38 @@
 
 namespace aimbot {
 
-    // 3D Silent bullet trajectory calculation and steering (matching STORM_MODS)
+    // 3D Silent bullet trajectory calculation and steering
     // Directly steers client-side bullet trajectory without touching camera rotation or weapon recoil.
     inline void apply_trajectory(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool isFiring) {
         if (!is_valid_ptr(localPlayer)) return;
 
-        // Trajectory write should only execute when weapon is actively firing (or trigger mode is Always In FOV)
+        // Trajectory write should only execute when weapon is actively firing (or when trigger mode is Always In FOV)
         if (!isFiring && cfg::aim::trigger_mode != 1) return;
 
-        // Dual resolution: Weapon AimingInfo (0xE58) and Auxiliary AimingInfo (0xE50)
-        uint64_t aimInfoWeapon = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo);     // 0xE58
-        uint64_t aimInfoAux    = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo_Alt); // 0xE50
+        // Resolve Weapon AimingInfo (0xE58)
+        uint64_t aimInfoWeapon = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo);
+        if (!is_valid_ptr(aimInfoWeapon)) {
+            // Fallback to auxiliary only if primary weapon AimInfo is uninitialized
+            aimInfoWeapon = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo_Alt);
+        }
+        if (!is_valid_ptr(aimInfoWeapon)) return;
 
-        if (!is_valid_ptr(aimInfoWeapon) && !is_valid_ptr(aimInfoAux)) return;
-
-        uint64_t primaryAimInfo = is_valid_ptr(aimInfoWeapon) ? aimInfoWeapon : aimInfoAux;
-
-        // Read start position (0x4C). Fall back to head position if uninitialized.
-        Vector3 bulletOrigin = rpm<Vector3>(primaryAimInfo + Offsets::Aim::StartPosition);
-        if (bulletOrigin == Vector3::Zero() || bulletOrigin.sqrMagnitude() < 0.01f) {
+        // Read start position (0x4C). Must be a valid world coordinate.
+        Vector3 bulletOrigin = rpm<Vector3>(aimInfoWeapon + Offsets::Aim::StartPosition);
+        if (bulletOrigin == Vector3::Zero() || bulletOrigin.sqrMagnitude() < 0.01f || !std::isfinite(bulletOrigin.x)) {
             uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
             if (localHead) bulletOrigin = GetNodePosition(localHead);
         }
 
+        if (bulletOrigin == Vector3::Zero() || bulletOrigin.sqrMagnitude() < 0.01f ||
+            !std::isfinite(bulletOrigin.x) || !std::isfinite(bulletOrigin.y) || !std::isfinite(bulletOrigin.z)) {
+            return; // Never compute trajectory from invalid/zero origin
+        }
+
         Vector3 target3D = target.headWorld;
-        if (target3D == Vector3::Zero()) return;
+        if (target3D == Vector3::Zero() || !std::isfinite(target3D.x) || !std::isfinite(target3D.y) || !std::isfinite(target3D.z)) {
+            return;
+        }
 
         // Apply target bone height adjustments
         if (cfg::aim::target_bone == 1) {
@@ -39,29 +46,26 @@ namespace aimbot {
             if (!lockToHead) {
                 target3D.y -= 0.28f; // Chest on non-headshot rolls
             }
-            // When lockToHead is true, target3D stays strictly at target.headWorld!
+            // When lockToHead is true, target3D stays strictly at target.headWorld
         }
 
-        if (!std::isfinite(bulletOrigin.x) ||
-            !std::isfinite(bulletOrigin.y) ||
-            !std::isfinite(bulletOrigin.z) ||
-            bulletOrigin.sqrMagnitude() <= 1e-4f) {
+        // Compute delta vector
+        Vector3 diff = target3D - bulletOrigin;
+        if (diff.sqrMagnitude() <= 1e-4f) return;
+
+        // CRITICAL: The Direction vector at AimingInfo+0x40 MUST BE A NORMALIZED UNIT VECTOR (|v| == 1.0).
+        // Passing an unnormalized distance vector (magnitude 20m..100m) into Unity's LookRotation causes
+        // camera rotation matrices to produce NaN / extreme values, breaking character and camera angles.
+        Vector3 shotDir = SafeNormalize(diff);
+        if (!std::isfinite(shotDir.x) || !std::isfinite(shotDir.y) || !std::isfinite(shotDir.z) || shotDir == Vector3::Zero()) {
             return;
         }
 
-        // Direct trajectory vector (dir = targetPos - startPos, matching reference engine)
-        Vector3 dir = target3D - bulletOrigin;
-        if (dir.sqrMagnitude() <= 1e-4f) return;
+        // Write unit direction vector to LastAimingInfoFromWeapon (0xE58 + 0x40)
+        wpm<Vector3>(aimInfoWeapon + Offsets::Aim::Direction, shotDir);
 
-        // Write directly to LastAimingInfoFromWeapon (0xE58 + 0x40)
-        if (is_valid_ptr(aimInfoWeapon)) {
-            wpm<Vector3>(aimInfoWeapon + Offsets::Aim::Direction, dir);
-        }
-
-        // Also write to Auxiliary AimingInfo (0xE50 + 0x40) if registered
-        if (is_valid_ptr(aimInfoAux) && aimInfoAux != aimInfoWeapon) {
-            wpm<Vector3>(aimInfoAux + Offsets::Aim::Direction, dir);
-        }
+        // Clear adjusted / interpolation flag (0x71) to ensure instant bullet alignment without camera warping
+        wpm<bool>(aimInfoWeapon + 0x71, false);
     }
 
 } // namespace aimbot
