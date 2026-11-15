@@ -31,6 +31,7 @@ static float screenHeight = 0, screenWidth = 0;
 
 struct touchObj {
     bool isDown = false;
+    bool isTmpDown = false;
     int x = 0;
     int y = 0;
     int id = 0;
@@ -83,6 +84,26 @@ static void genRandomString(char *string, int length) {
 }
 
 static std::mutex s_uploadMutex;
+
+static std::mutex s_uiRectMutex;
+static bool s_uiActive = false;
+static float s_uiX = 0.0f, s_uiY = 0.0f, s_uiW = 0.0f, s_uiH = 0.0f;
+
+void Touch_SetUiRect(float x, float y, float w, float h, bool active) {
+    std::lock_guard<std::mutex> lock(s_uiRectMutex);
+    s_uiActive = active;
+    s_uiX = x;
+    s_uiY = y;
+    s_uiW = w;
+    s_uiH = h;
+}
+
+bool Touch_IsPointInUi(float x, float y) {
+    std::lock_guard<std::mutex> lock(s_uiRectMutex);
+    if (!s_uiActive) return false;
+    return (x >= s_uiX && x <= (s_uiX + s_uiW) &&
+            y >= s_uiY && y <= (s_uiY + s_uiH));
+}
 
 static void Upload() {
     if (Touch_readOnly || nowfd <= 0) {
@@ -200,20 +221,28 @@ static void *TypeA(void *arg) {
                 if (ie.code == ABS_MT_TRACKING_ID) {
                     if (ie.value == -1) {
                         Finger[i][latest].isDown = false;
+                        Finger[i][latest].isTmpDown = false;
+                        ImGuiIO &io = ImGui::GetIO();
+                        io.MouseDown[0] = false;
                     } else {
                         Finger[i][latest].id = (i * 2 + 1) * maxF + latest;
                         Finger[i][latest].isDown = true;
+                        Finger[i][latest].isTmpDown = true;
+                        ImGuiIO &io = ImGui::GetIO();
+                        io.MouseDown[0] = true;
                     }
                     continue;
                 }
                 if (ie.code == ABS_MT_POSITION_X || ie.code == ABS_X) {
                     Finger[i][latest].id = (i * 2 + 1) * maxF + latest;
                     Finger[i][latest].x = ie.value;
+                    Finger[i][latest].isTmpDown = true;
                     continue;
                 }
                 if (ie.code == ABS_MT_POSITION_Y || ie.code == ABS_Y) {
                     Finger[i][latest].id = (i * 2 + 1) * maxF + latest;
                     Finger[i][latest].y = ie.value;
+                    Finger[i][latest].isTmpDown = true;
                     continue;
                 }
             }
@@ -258,11 +287,24 @@ static void *TypeA(void *arg) {
 
                     io.MousePos = ImVec2(x, y);
                     io.MouseDown[0] = true;
+
+                    // Intercept touch inside UI (Swallow from game / uinput)
+                    if (Touch_IsPointInUi(x, y)) {
+                        Finger[i][latest].isDown = false;
+                        Finger[i][latest].isTmpDown = false;
+                    }
                 } else {
                     io.MouseDown[0] = false;
                 }
-                if (!Touch_readOnly && nowfd > 0) {
-                    Upload();
+
+                if (Finger[i][latest].isTmpDown) {
+                    if (!Touch_readOnly && nowfd > 0) {
+                        Upload();
+                    }
+                } else if (!Finger[i][latest].isDown) {
+                    if (!Touch_readOnly && nowfd > 0) {
+                        Upload();
+                    }
                 }
                 continue;
             }
@@ -337,51 +379,60 @@ bool Touch_Init(int w, int h, uint32_t orientation_, bool readOnly) {
         struct uinput_user_dev ui_dev;
         nowfd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
         if (nowfd <= 0) {
-            return false;
-        }
+            // Graceful fallback: ungrab touch devices and run in passive mode if uinput is restricted
+            readOnly = true;
+            for (int k = 0; k < fdNum; k++) {
+                ioctl(origfd[k], EVIOCGRAB, UNGRAB);
+            }
+        } else {
+            int string_len = rand() % 10 + 5;
+            char string[string_len];
+            memset(&ui_dev, 0, sizeof(ui_dev));
 
-        int string_len = rand() % 10 + 5;
-        char string[string_len];
-        memset(&ui_dev, 0, sizeof(ui_dev));
+            genRandomString(string, string_len);
+            strncpy(ui_dev.name, string, UINPUT_MAX_NAME_SIZE);
 
-        genRandomString(string, string_len);
-        strncpy(ui_dev.name, string, UINPUT_MAX_NAME_SIZE);
+            ui_dev.id.bustype = 0;
+            ui_dev.id.vendor = rand() % 10 + 5;
+            ui_dev.id.product = rand() % 10 + 5;
+            ui_dev.id.version = rand() % 10 + 5;
 
-        ui_dev.id.bustype = 0;
-        ui_dev.id.vendor = rand() % 10 + 5;
-        ui_dev.id.product = rand() % 10 + 5;
-        ui_dev.id.version = rand() % 10 + 5;
+            ioctl(nowfd, UI_SET_PROPBIT, INPUT_PROP_DIRECT);
 
-        ioctl(nowfd, UI_SET_PROPBIT, INPUT_PROP_DIRECT);
+            ioctl(nowfd, UI_SET_EVBIT, EV_ABS);
+            ioctl(nowfd, UI_SET_ABSBIT, ABS_X);
+            ioctl(nowfd, UI_SET_ABSBIT, ABS_Y);
+            ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_POSITION_X);
+            ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_POSITION_Y);
+            ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_TRACKING_ID);
+            ioctl(nowfd, UI_SET_EVBIT, EV_SYN);
+            ioctl(nowfd, UI_SET_EVBIT, EV_KEY);
+            ioctl(nowfd, UI_SET_KEYBIT, BTN_TOOL_FINGER);
+            ioctl(nowfd, UI_SET_KEYBIT, BTN_TOUCH);
 
-        ioctl(nowfd, UI_SET_EVBIT, EV_ABS);
-        ioctl(nowfd, UI_SET_ABSBIT, ABS_X);
-        ioctl(nowfd, UI_SET_ABSBIT, ABS_Y);
-        ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_POSITION_X);
-        ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_POSITION_Y);
-        ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_TRACKING_ID);
-        ioctl(nowfd, UI_SET_EVBIT, EV_SYN);
-        ioctl(nowfd, UI_SET_EVBIT, EV_KEY);
-        ioctl(nowfd, UI_SET_KEYBIT, BTN_TOOL_FINGER);
-        ioctl(nowfd, UI_SET_KEYBIT, BTN_TOUCH);
+            genRandomString(string, string_len);
+            ioctl(nowfd, UI_SET_PHYS, string);
 
-        genRandomString(string, string_len);
-        ioctl(nowfd, UI_SET_PHYS, string);
+            ui_dev.absmin[ABS_MT_POSITION_X] = 0;
+            ui_dev.absmax[ABS_MT_POSITION_X] = (int)s_digitizerMaxX;
+            ui_dev.absmin[ABS_MT_POSITION_Y] = 0;
+            ui_dev.absmax[ABS_MT_POSITION_Y] = (int)s_digitizerMaxY;
+            ui_dev.absmin[ABS_X] = 0;
+            ui_dev.absmax[ABS_X] = (int)s_digitizerMaxX;
+            ui_dev.absmin[ABS_Y] = 0;
+            ui_dev.absmax[ABS_Y] = (int)s_digitizerMaxY;
+            ui_dev.absmin[ABS_MT_TRACKING_ID] = 0;
+            ui_dev.absmax[ABS_MT_TRACKING_ID] = 65535;
+            write(nowfd, &ui_dev, sizeof(ui_dev));
 
-        ui_dev.absmin[ABS_MT_POSITION_X] = 0;
-        ui_dev.absmax[ABS_MT_POSITION_X] = (int)s_digitizerMaxX;
-        ui_dev.absmin[ABS_MT_POSITION_Y] = 0;
-        ui_dev.absmax[ABS_MT_POSITION_Y] = (int)s_digitizerMaxY;
-        ui_dev.absmin[ABS_X] = 0;
-        ui_dev.absmax[ABS_X] = (int)s_digitizerMaxX;
-        ui_dev.absmin[ABS_Y] = 0;
-        ui_dev.absmax[ABS_Y] = (int)s_digitizerMaxY;
-        ui_dev.absmin[ABS_MT_TRACKING_ID] = 0;
-        ui_dev.absmax[ABS_MT_TRACKING_ID] = 65535;
-        write(nowfd, &ui_dev, sizeof(ui_dev));
-
-        if (ioctl(nowfd, UI_DEV_CREATE)) {
-            return false;
+            if (ioctl(nowfd, UI_DEV_CREATE) != 0) {
+                close(nowfd);
+                nowfd = 0;
+                readOnly = true;
+                for (int k = 0; k < fdNum; k++) {
+                    ioctl(origfd[k], EVIOCGRAB, UNGRAB);
+                }
+            }
         }
     }
 

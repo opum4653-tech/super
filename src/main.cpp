@@ -130,7 +130,7 @@ static int start_overlay() {
         return -1;
     }
 
-    Touch_Init(displayInfo.width, displayInfo.height, displayInfo.orientation, true);
+    Touch_Init(displayInfo.width, displayInfo.height, displayInfo.orientation, false);
 
 // START BACKGROUND ATTACH THREAD
     // Allows overlay GUI & floating logo to appear immediately upon launching,
