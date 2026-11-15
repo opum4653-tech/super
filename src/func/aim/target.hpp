@@ -7,6 +7,8 @@ namespace aimbot {
         PlayerData target;
         Vector3 bestScreenPos = Vector3::Zero();
         bool isScoping = false;
+        bool isFiring = false;
+        bool triggerActive = false;
         bool valid = false;
     };
 
@@ -26,6 +28,7 @@ namespace aimbot {
         if (!isFiring) {
             isFiring = rpm<bool>(localPlayer + 0x850);
         }
+        result.isFiring = isFiring;
 
         // FollowCamera is at localPlayer + 0x690. Inside FollowCamera, FOVOffset is at 0x84!
         // When scoping (especially sniper rifles like AWM, Kar98, M82B), FOVOffset shifts negative.
@@ -44,19 +47,12 @@ namespace aimbot {
         } else {
             triggerActive = isFiring;
         }
+        result.triggerActive = triggerActive;
 
-        if (!triggerActive) {
-            // Grace period: keep aim trajectory active across rapid-fire bullet intervals
-            if (s_lockTimeoutTicks > 0) {
-                s_lockTimeoutTicks--;
-            } else {
-                s_lockedTargetAddr = 0;
-                s_smoothDir = Vector3::Zero();
-                return result;
-            }
-        } else {
-            // Active trigger -> refresh lock lease
-            s_lockTimeoutTicks = 16;
+        if (triggerActive) {
+            s_lockTimeoutTicks = 30; // Active trigger: refresh lock lease
+        } else if (s_lockTimeoutTicks > 0) {
+            s_lockTimeoutTicks--;    // Grace period across rapid-fire intervals
         }
 
         std::vector<PlayerData> enemies;
@@ -79,7 +75,7 @@ namespace aimbot {
         if (s_lockedTargetAddr != 0) {
             for (const auto& enemy : enemies) {
                 if (enemy.addr == s_lockedTargetAddr) {
-                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f && enemy.isVisible) {
+                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f && (cfg::aim::silent || enemy.isVisible)) {
                         float dxHead = enemy.Head.x - screenCx;
                         float dyHead = enemy.Head.y - screenCy;
                         float distHead = sqrtf(dxHead * dxHead + dyHead * dyHead);
@@ -107,7 +103,7 @@ namespace aimbot {
             }
         }
 
-        // 2. NEW TARGET ACQUISITION (BASED ON SCREEN CENTER FOV CIRCLE)
+        // 2. NEW TARGET ACQUISITION (BASED ON SCREEN CENTER FOV CIRCLE — MATCHING STORM_MODS)
         if (!foundLocked) {
             float bestScore = 9999999.0f;
             const PlayerData* bestEnemy = nullptr;
@@ -116,8 +112,8 @@ namespace aimbot {
                 if (enemy.Head.z < 0.05f || enemy.curHP <= 0) continue;
                 if (cfg::aim::ignore_bots && enemy.isBot) continue;
 
-                // Unconditional wall filter: acquiring through cover is avoided
-                if (!enemy.isVisible) continue;
+                // For Silent Aim, acquire enemies within FOV circle even if Uma_Visible is occluded/brush (matching STORM_MODS)
+                if (!cfg::aim::silent && !enemy.isVisible) continue;
                 if (enemy.distance > cfg::aim::max_distance) continue;
 
                 float dxHead = enemy.Head.x - screenCx;
@@ -157,6 +153,7 @@ namespace aimbot {
 
         if (!result.valid) {
             s_lockedTargetAddr = 0;
+            s_smoothDir = Vector3::Zero();
         }
 
         return result;

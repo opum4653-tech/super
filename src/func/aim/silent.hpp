@@ -5,8 +5,11 @@ namespace aimbot {
 
     // 3D Silent bullet trajectory calculation and steering (matching STORM_MODS)
     // Directly steers client-side bullet trajectory without touching camera rotation or weapon recoil.
-    inline void apply_trajectory(uint64_t localPlayer, const PlayerData& target, bool lockToHead) {
+    inline void apply_trajectory(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool isFiring) {
         if (!is_valid_ptr(localPlayer)) return;
+
+        // Trajectory write should only execute when weapon is actively firing (or trigger mode is Always In FOV)
+        if (!isFiring && cfg::aim::trigger_mode != 1) return;
 
         // Dual resolution: Weapon AimingInfo (0xE58) and Auxiliary AimingInfo (0xE50)
         uint64_t aimInfoWeapon = rpm<uint64_t>(localPlayer + Offsets::Player::AimInfo);     // 0xE58
@@ -32,9 +35,11 @@ namespace aimbot {
         } else if (cfg::aim::target_bone == 2) {
             target3D.y -= 0.40f; // Body / Pelvis
         } else {
+            // Target bone 0 (Head):
             if (!lockToHead) {
                 target3D.y -= 0.28f; // Chest on non-headshot rolls
             }
+            // When lockToHead is true, target3D stays strictly at target.headWorld!
         }
 
         if (!std::isfinite(bulletOrigin.x) ||

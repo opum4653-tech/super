@@ -72,7 +72,7 @@ namespace aimbot {
         bool lockToHead = evaluate_headshot(acq.target, acq.isScoping);
 
         // 3D Silent bullet trajectory steering
-        apply_trajectory(localPlayer, acq.target, lockToHead);
+        apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
     }
 
     inline void loop() {
