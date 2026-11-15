@@ -4,7 +4,7 @@
 extern float g_sw;
 
 namespace cfg {
-    inline bool master_enabled = true; // Global Master Switch: controls all features, preserves selection state
+    inline bool master_enabled = false; // Global Master Switch: controls all features, preserves selection state
 
 namespace esp {
 // Master
