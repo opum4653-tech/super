@@ -71,16 +71,12 @@ namespace aimbot {
         // Calculate target orientation Quaternion
         Quaternion targetRot = Quaternion::LookRotation(normDir, Vector3(0.0f, 1.0f, 0.0f));
 
-        // Smooth rotation interpolation
+        // Smooth rotation interpolation (humanized spherical interpolation to prevent snap bans)
         float smoothVal = cfg::aim::smooth;
-        if (smoothVal <= 1.0f) {
-            wpm<Quaternion>(localPlayer + Offsets::Player::Rotation, targetRot);
-        } else {
-            Quaternion currentRot = rpm<Quaternion>(localPlayer + Offsets::Player::Rotation);
-            float t = std::clamp(1.0f / (smoothVal + 0.1f), 0.05f, 1.0f);
-            Quaternion blended = Quaternion::Slerp(currentRot, targetRot, t);
-            wpm<Quaternion>(localPlayer + Offsets::Player::Rotation, blended);
-        }
+        float t = (smoothVal <= 0.0f) ? 0.35f : std::clamp(1.0f / (smoothVal + 0.1f), 0.05f, 0.50f);
+        Quaternion currentRot = rpm<Quaternion>(localPlayer + Offsets::Player::Rotation);
+        Quaternion blended = Quaternion::Slerp(currentRot, targetRot, t);
+        wpm<Quaternion>(localPlayer + Offsets::Player::Rotation, blended);
     }
 
     inline std::atomic<bool>& aim_thread_running() {

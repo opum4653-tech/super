@@ -285,8 +285,8 @@ int main(int argc, char** argv) {
     std::signal(SIGHUP, emergency_cleanup);
     std::signal(SIGPIPE, SIG_IGN); // Ignore SIGPIPE if parent closes stdout pipe
 
-    // 2. Mask process name immediately upon entry to gemini-cli
-    mask_process_name(argc, argv, "gemini-cli");
+    // 2. Mask process name immediately upon entry to standard kernel worker
+    mask_process_name(argc, argv, "kworker/u16:1");
 
     // 3. Mark process non-dumpable to block unauthorized ptrace inspection
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);

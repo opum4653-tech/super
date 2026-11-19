@@ -600,6 +600,12 @@ namespace data {
             // In lobby or between matches: throttle politely to 100ms (10 checks/sec)
             if (!inMatch.load(std::memory_order_relaxed)) {
                 iv = 100;
+            } else {
+                // Anti-detection timing jitter: +/- 2ms non-periodic cadence to foil frequency analyzers
+                static uint32_t s_jitterRng = 0x12345678;
+                s_jitterRng = s_jitterRng * 1103515245 + 12345;
+                iv += static_cast<int>((s_jitterRng % 5) - 2);
+                if (iv < 5) iv = 5;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(iv));

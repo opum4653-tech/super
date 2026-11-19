@@ -50,18 +50,18 @@ namespace silent {
     static void writer_loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             if (!g_hasData.load(std::memory_order_relaxed) || g_hitObj == 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
 
-            // Zero-sleep continuous memory write while shooting
+            // Continuous memory write strictly during active firing
             {
                 std::lock_guard<std::mutex> lock(g_silent_lock);
                 if (g_hasData.load(std::memory_order_relaxed) && g_hitObj != 0) {
                     wpm<Vector3>(g_hitObj + Offsets::AimInfo_Direction, g_targetDir); // 0x40 (RayDir)
                 }
             }
-            sched_yield();
+            usleep(500); // 2,000 writes/sec: 33x faster than game tick, zero kernel spin locks
         }
     }
 
@@ -85,8 +85,8 @@ namespace silent {
             return;
         }
 
-        // Steer trajectory only when weapon is actively firing (or Always In FOV)
-        if (!isFiring && cfg::aim::trigger_mode != 1) {
+        // Anti-Ban Invariant: Strictly write trajectory ONLY when weapon is actively firing
+        if (!isFiring) {
             clear_silent_data();
             return;
         }

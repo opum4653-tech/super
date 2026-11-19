@@ -109,7 +109,7 @@ namespace aimbot {
         if (s_lockedTargetAddr != 0) {
             for (const auto& enemy : enemies) {
                 if (enemy.addr == s_lockedTargetAddr) {
-                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f && (cfg::aim::silent || enemy.isVisible)) {
+                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f && enemy.isVisible) {
                         float dxHead = enemy.Head.x - screenCx;
                         float dyHead = enemy.Head.y - screenCy;
                         float distHead = sqrtf(dxHead * dxHead + dyHead * dyHead);
@@ -146,8 +146,9 @@ namespace aimbot {
                 if (enemy.Head.z < 0.05f || enemy.curHP <= 0) continue;
                 if (cfg::aim::ignore_bots && enemy.isBot) continue;
 
-                // For Silent Aim, acquire enemies within FOV circle even if Uma_Visible is occluded/brush (matching STORM_MODS)
-                if (!cfg::aim::silent && !enemy.isVisible) continue;
+                // Anti-Ban Invariant: Strictly require line-of-sight visibility (matching pewpew).
+                // Shooting occluded enemies through walls trips server-side geometry raycast bans.
+                if (!enemy.isVisible) continue;
                 if (cfg::aim::max_distance > 0.0f && enemy.distance > cfg::aim::max_distance) continue;
 
                 float dxHead = enemy.Head.x - screenCx;
