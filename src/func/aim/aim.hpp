@@ -53,9 +53,13 @@ namespace aimbot {
         } else if (cfg::aim::target_bone == 2) {
             target3D = pelvisPos;
         } else {
-            if (!lockToHead) {
-                target3D = chestPos;
+            // Target bone 0 (Head):
+            if (cfg::aim::headshot_rate > 0.0f) {
+                if (!lockToHead) {
+                    target3D = chestPos;
+                }
             }
+            // else directly target3D (headWorld)
         }
 
         Vector3 dir = target3D - camPos;

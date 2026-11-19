@@ -57,11 +57,11 @@ struct PlayerData {
           weaponType(-1)
     { name[0] = 0; }
 
-    Vector3 getTargetWorld(int targetPos, float headBias = 0.08f) const {
+    Vector3 getTargetWorld(int targetPos, float headBias = 0.0f) const {
         switch (targetPos) {
             case 1:  return (neckWorld != Vector3::Zero()) ? neckWorld : (headWorld - Vector3(0.0f, 0.20f, 0.0f));
             case 2:  return (hipWorld != Vector3::Zero()) ? hipWorld : (spineWorld != Vector3::Zero() ? spineWorld : (headWorld - Vector3(0.0f, 0.50f, 0.0f)));
-            default: return Vector3(headWorld.x, headWorld.y + headBias, headWorld.z);
+            default: return (headBias != 0.0f) ? Vector3(headWorld.x, headWorld.y + headBias, headWorld.z) : headWorld;
         }
     }
 };

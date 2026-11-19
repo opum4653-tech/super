@@ -704,7 +704,7 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "FOV & Target Settings", ui_scale);
 
                     ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##AimFov", &cfg::aim::aim_fov, 5.0f, 180.0f, "%.0f deg");
+                    ImGui::SliderFloat("##AimFov", &cfg::aim::aim_fov, 0.0f, 180.0f, "%.0f deg");
                     ImGui::TextDisabled("AimFov (0 - 180)");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
@@ -731,7 +731,7 @@ namespace ui::menu {
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 1.0f, 25.0f, "%.1f");
+                    ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 0.0f, 25.0f, "%.1f");
                     ImGui::TextDisabled("Aim Smoothness");
                 }
                 // ============================================================
@@ -743,7 +743,7 @@ namespace ui::menu {
 
                     DrawToggleSwitch("Air Flight", &cfg::motion::air_flight, 48.0f * ui_scale, ui_scale);
                     ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##FlightHeight", &cfg::motion::flight_height, 1.0f, 15.0f, "%.1f m");
+                    ImGui::SliderFloat("##FlightHeight", &cfg::motion::flight_height, 0.0f, 15.0f, "%.1f m");
                     ImGui::TextDisabled("Flight Elevation Height");
 
                     ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));

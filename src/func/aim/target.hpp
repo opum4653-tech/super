@@ -121,7 +121,7 @@ namespace aimbot {
                         float distBody = sqrtf(dxBody * dxBody + dyBody * dyBody);
 
                         float dist = std::min(distHead, distBody);
-                        if (dist <= fovLimit * 1.35f) {
+                        if (fovLimit <= 0.0f || dist <= fovLimit * 1.35f) {
                             result.target = enemy;
                             result.bestScreenPos = enemy.Head;
                             result.valid = true;
@@ -148,7 +148,7 @@ namespace aimbot {
 
                 // For Silent Aim, acquire enemies within FOV circle even if Uma_Visible is occluded/brush (matching STORM_MODS)
                 if (!cfg::aim::silent && !enemy.isVisible) continue;
-                if (enemy.distance > cfg::aim::max_distance) continue;
+                if (cfg::aim::max_distance > 0.0f && enemy.distance > cfg::aim::max_distance) continue;
 
                 float dxHead = enemy.Head.x - screenCx;
                 float dyHead = enemy.Head.y - screenCy;
@@ -161,7 +161,7 @@ namespace aimbot {
                 float distBody = sqrtf(dxBody * dxBody + dyBody * dyBody);
 
                 float crosshairDist = std::min(distHead, distBody);
-                if (crosshairDist > fovLimit) continue;
+                if (fovLimit > 0.0f && crosshairDist > fovLimit) continue;
 
                 float score = crosshairDist;
                 if (cfg::aim::priority_mode == 1) { // Lowest HP

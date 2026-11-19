@@ -113,8 +113,8 @@ namespace silent {
             return;
         }
 
-        // Target bone selection matching pewpew getTargetWorld
-        float headBias = cfg::aim::head_bias; // default 0.08m for crisp headshot centering
+        // Target bone selection (100% controllable from menu, zero forced defaults)
+        float headBias = cfg::aim::head_bias; // 0.0f default: zero forced bias
         Vector3 target3D;
         if (cfg::aim::target_bone == 1) {
             target3D = target.getTargetWorld(1, headBias); // Neck
@@ -122,10 +122,12 @@ namespace silent {
             target3D = target.getTargetWorld(2, headBias); // Chest / Spine
         } else {
             // Target bone 0 (Head):
-            if (lockToHead) {
-                target3D = target.getTargetWorld(0, headBias); // Head + vertical bias
+            if (cfg::aim::headshot_rate > 0.0f) {
+                // If user configured a specific headshot rate (1% - 100%), obey probability roll
+                target3D = lockToHead ? target.getTargetWorld(0, headBias) : target.getTargetWorld(1, headBias);
             } else {
-                target3D = target.getTargetWorld(1, headBias); // Neck on non-head rolls
+                // Default zero: directly target Head without forcing neck or body
+                target3D = target.getTargetWorld(0, headBias);
             }
         }
 

@@ -65,16 +65,16 @@ namespace aim {
     inline bool  scope_aim        = false; // Off by default. Enabling adds a write path on scope.
     inline bool  sniper_aim       = false; // Off by default. Enabling forces head lock, ignoring headshot_rate.
     inline bool  show_fov         = false;
-    inline float aim_fov          = 35.0f;  // AimFov (0° - 180°), matching reference calculation
-    inline float fov_radius       = 180.0f; // Fallback pixel radius
-    inline float smooth           = 5.0f;   // Safe default: smooth lerp (1=snap, 10=slow). Range 3-8 looks natural.
-    inline float headshot_rate    = 85.0f;  // Safe 85% default rate to prevent server heuristic ban
-    inline float head_bias        = 0.08f;  // Vertical bias (+0.08m) for dead-center headshot alignment
+    inline float aim_fov          = 0.0f;   // 0.0f default: fully controlled from menu slider
+    inline float fov_radius       = 0.0f;   // 0.0f default
+    inline float smooth           = 0.0f;   // 0.0f default: fully controlled from menu slider
+    inline float headshot_rate    = 0.0f;   // 0.0f default: fully controlled from menu slider
+    inline float head_bias        = 0.0f;   // 0.0f default: zero forced bias
     inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
     inline bool  ignore_bots      = false;
-    inline float max_distance     = 200.0f;
+    inline float max_distance     = 0.0f;  // 0.0f default: fully controlled from menu
 
     inline float get_fov_radius() {
         if (aim_fov > 0.0f && g_sw > 0.0f) {
@@ -86,7 +86,7 @@ namespace aim {
 
 namespace motion {
     inline bool  air_flight    = false; // Air Flight elevation modifier
-    inline float flight_height = 4.5f;  // Elevation height in meters
+    inline float flight_height = 0.0f;  // 0.0f default: fully controlled from menu slider
     inline bool  phantom_mode  = false; // Phantom Mode entity visibility
 }
 
