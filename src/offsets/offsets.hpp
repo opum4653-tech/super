@@ -19,7 +19,8 @@
 // 3. Camera Projection Matrix:
 //    Player + Camera (0x690) -> FollowCamera + 0x28 -> Camera + 0x10 -> Matrix (0x100)
 // 4. Hit Registration Raycast:
-//    Player + LockedAimingCollider (0x80) & LockedAimingCollider_Alt (0x78)
+//    Player + LockedAimingCollider (0x80 / ColliderBody on AttackableEntity).
+//    CRITICAL: Offset 0x78 was a fatal flaw that clobbered 0x7C (Player::IsDead) in ARM64. Never restore it.
 // ============================================================================
 
 #include <cstdint>
@@ -70,8 +71,7 @@ namespace Offsets {
         constexpr uintptr_t Avatar               = 0x770;   // AvatarManager
         constexpr uintptr_t HeadCollider         = 0x740;   // Primary: Head Collider (0x740 in FF 1.132.1 / FF Max)
         constexpr uintptr_t HeadCollider_Alt     = 0x738;   // Auxiliary: Head Collider (0x738 in legacy FF)
-        constexpr uintptr_t LockedAimingCollider = 0x80;    // Primary: Collider on AttackableEntity (ColliderBody)
-        constexpr uintptr_t LockedAimingCollider_Alt = 0x78;// Auxiliary: AttackableEntity Current Collider
+        constexpr uintptr_t LockedAimingCollider = 0x80;    // Primary: Collider on AttackableEntity (ColliderBody, from STORM_MODS)
         constexpr uintptr_t IsBot                = 0x4A0;   // Boolean
         constexpr uintptr_t Name                 = 0x490;   // MonoString*
         constexpr uintptr_t Speed                = 0x560;   // Single (Default 1.0f)
@@ -189,7 +189,6 @@ namespace Offsets {
     constexpr uintptr_t Player_HeadCollider         = Player::HeadCollider;
     constexpr uintptr_t Player_HeadCollider_Alt     = Player::HeadCollider_Alt;
     constexpr uintptr_t Player_LockedAimingCollider = Player::LockedAimingCollider;
-    constexpr uintptr_t Player_LockedAimingCollider_Alt = Player::LockedAimingCollider_Alt;
     constexpr uintptr_t Player_IsBot             = Player::IsBot;
     constexpr uintptr_t Player_Name              = Player::Name;
     constexpr uintptr_t Player_Speed             = Player::Speed;

@@ -48,6 +48,7 @@ namespace aimbot {
     };
 
     inline TargetInfo g_currentTarget;
+    inline std::mutex g_targetMutex;
 
     // ------------------------------------------------------------------------
     // SAFE 3D UNIT VECTOR NORMALIZATION

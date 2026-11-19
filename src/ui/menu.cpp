@@ -290,8 +290,8 @@ namespace ui::menu {
 
     void render() {
         // Render background overlays (ESP & Aimbot FOV)
+        // Note: func::aim::update() runs decoupled in the dedicated aimbot worker thread
         func::esp::draw();
-        func::aim::update();
         func::aim::render_fov(ImGui::GetBackgroundDrawList());
 
         ImGuiIO& io = ImGui::GetIO();

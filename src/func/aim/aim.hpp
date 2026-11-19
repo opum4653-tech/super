@@ -26,7 +26,6 @@
 
 namespace aimbot {
 
-
     inline std::atomic<bool>& aim_thread_running() {
         static std::atomic<bool> s_run{false};
         return s_run;
@@ -35,23 +34,28 @@ namespace aimbot {
     inline void update() {
         if (!cfg::master_enabled) {
             motion::reset();
+            std::lock_guard<std::mutex> lk(g_targetMutex);
+            g_currentTarget.valid = false;
             return;
         }
 
         // Run motion enhancement updates
         motion::update();
 
-        g_currentTarget.valid = false;
         if (!cfg::aim::enable && !cfg::aim::silent) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
             s_smoothDir = Vector3::Zero();
+            std::lock_guard<std::mutex> lk(g_targetMutex);
+            g_currentTarget.valid = false;
             return;
         }
 
         if (!data::inMatch.load(std::memory_order_relaxed)) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
+            std::lock_guard<std::mutex> lk(g_targetMutex);
+            g_currentTarget.valid = false;
             return;
         }
 
@@ -59,20 +63,27 @@ namespace aimbot {
         if (!is_valid_ptr(localPlayer)) {
             s_lockedTargetAddr = 0;
             s_lockTimeoutTicks = 0;
+            std::lock_guard<std::mutex> lk(g_targetMutex);
+            g_currentTarget.valid = false;
             return;
         }
 
         TargetAcquisitionResult acq = acquire_target(localPlayer);
         if (!acq.valid) {
+            std::lock_guard<std::mutex> lk(g_targetMutex);
+            g_currentTarget.valid = false;
             return;
         }
 
-        // Target screen position tracking
-        g_currentTarget.valid = true;
-        g_currentTarget.screenPos = acq.bestScreenPos;
+        // Target screen position tracking (thread-safe snapshot for FOV ring)
+        {
+            std::lock_guard<std::mutex> lk(g_targetMutex);
+            g_currentTarget.valid = true;
+            g_currentTarget.screenPos = acq.bestScreenPos;
+        }
 
-        // Headshot evaluation & collider mapping
-        bool lockToHead = evaluate_headshot(acq.target, acq.isScoping);
+        // Headshot evaluation & collider mapping (strictly fire-gated)
+        bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.isFiring);
 
         // 3D Silent bullet trajectory steering
         apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
@@ -106,6 +117,8 @@ namespace aimbot {
     inline void thread_stop() {
         aim_thread_running().store(false);
         motion::reset();
+        std::lock_guard<std::mutex> lk(g_targetMutex);
+        g_currentTarget.valid = false;
     }
 
 } // namespace aimbot
