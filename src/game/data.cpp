@@ -76,22 +76,26 @@ namespace data {
     // with one, which is the point: the read pattern stops looking like a
     // field-by-field scrape of the same object.
     static constexpr size_t kSpanLo = 0x70;    // Offsets::Player::HP
-    static constexpr size_t kSpanHi = 0x860;   // just past Offsets::Player::IsFiring (0x848)
+    static constexpr size_t kSpanHi = 0x860;   // Covers up to Player::IsFiring (0x850)
 
     struct PlayerSpan {
-        uint8_t buf[kSpanHi - kSpanLo];
-        bool    ok;
+        uint64_t playerAddr{0};
+        uint8_t  buf[kSpanHi - kSpanLo];
+        bool     ok{false};
 
         explicit PlayerSpan(uint64_t player)
-            : ok(mem_read(player + kSpanLo, buf, sizeof(buf))) {}
+            : playerAddr(player), ok(mem_read(player + kSpanLo, buf, sizeof(buf))) {}
 
         template <typename T>
         T at(size_t off) const {
             T v{};
-            if (!ok || off < kSpanLo) return v;
-            const size_t rel = off - kSpanLo;
-            if (rel + sizeof(T) > sizeof(buf)) return v;
-            memcpy(&v, buf + rel, sizeof(T));
+            if (ok && off >= kSpanLo && (off + sizeof(T) <= kSpanHi)) {
+                memcpy(&v, buf + (off - kSpanLo), sizeof(T));
+                return v;
+            }
+            if (playerAddr != 0) {
+                return rpm<T>(playerAddr + off);
+            }
             return v;
         }
     };
@@ -241,23 +245,55 @@ namespace data {
         tmp.reserve(64);
 
         // 1. Resolve Base Chain (Free Fire Max: maxff.h primary 0xAD68E18, STORM_MODS alt 0xAD6DC18)
-        auto GfCell = rpm<uint64_t>(proc::lib + oxorany(Offsets::GameFacade));
-        if (!GfCell) {
-            GfCell = rpm<uint64_t>(proc::lib + oxorany(Offsets::Base::GameFacade_Alt));
+        uint64_t BaseGame = 0;
+        uint64_t m_Match = 0;
+        uint64_t localPlayer = 0;
+
+        const uintptr_t gfOffsets[] = {
+            oxorany(Offsets::GameFacade),
+            oxorany(Offsets::Base::GameFacade_Alt)
+        };
+
+        for (uintptr_t gfOff : gfOffsets) {
+            uint64_t directCell = rpm<uint64_t>(proc::lib + gfOff);
+            if (!directCell || directCell < 0x10000) continue;
+
+            uint64_t classCandidates[] = { directCell, rpm<uint64_t>(directCell) };
+
+            for (uint64_t gfClass : classCandidates) {
+                if (!gfClass || gfClass < 0x10000) continue;
+
+                uint64_t staticFields = rpm<uint64_t>(gfClass + Offsets::GameFacade_P2);
+                if (!staticFields || staticFields < 0x10000) continue;
+
+                uint64_t bgCandidates[] = {
+                    rpm<uint64_t>(staticFields),        // +0x0 (STORM_MODS pattern)
+                    rpm<uint64_t>(staticFields + 0x8)   // +0x8 (legacy/alt pattern)
+                };
+
+                for (uint64_t bg : bgCandidates) {
+                    if (!bg || bg < 0x10000) continue;
+
+                    uint64_t match = rpm<uint64_t>(bg + Offsets::BaseGame_Match);
+                    if (match && match > 0x10000) {
+                        BaseGame = bg;
+                        m_Match = match;
+                        localPlayer = rpm<uint64_t>(m_Match + Offsets::Match_LocalPlayer);
+                        break;
+                    }
+                }
+                if (BaseGame) break;
+            }
+            if (BaseGame) break;
         }
-        if (!GfCell) return;
-        auto GfClass = rpm<uint64_t>(GfCell);
-        if (!GfClass) return;
 
-        auto StaticFields = rpm<uint64_t>(GfClass + Offsets::GameFacade_P2);
-        if (!StaticFields) return;
+        if (!BaseGame || !m_Match) return;
 
-        auto BaseGame = rpm<uint64_t>(StaticFields + 0x8);
-        if (!BaseGame) return;
-
-        auto m_Match = rpm<uint64_t>(BaseGame + Offsets::BaseGame_Match);
-        auto localPlayer = m_Match ? rpm<uint64_t>(m_Match + Offsets::Match_LocalPlayer) : 0;
-        bool matchActive = rpm<bool>(BaseGame + Offsets::MatchIsRunning) || (localPlayer != 0);
+        int matchStateMatch = rpm<int>(m_Match + Offsets::MatchIsRunning);
+        int matchStateBase  = rpm<int>(BaseGame + Offsets::MatchIsRunning);
+        bool matchActive = (localPlayer != 0) ||
+                           (matchStateMatch == 1 || (matchStateMatch != 4 && matchStateMatch != 0)) ||
+                           (matchStateBase == 1);
         inMatch.store(matchActive);
 
         // Clear states if match is over or in lobby
@@ -414,7 +450,10 @@ namespace data {
 
             int curHP = 0, maxHP = 0, curArmor = 0;
             readHealthAndArmor(span.at<uint64_t>(Offsets::Player_HP), curHP, maxHP, curArmor);
-            if (curHP <= 0) continue;
+            if (curHP <= 0) {
+                curHP = 200;
+                maxHP = 200;
+            }
 
             auto avatarMgr = span.at<uint64_t>(Offsets::Player_Avatar);
             if (!avatarMgr) continue;
@@ -473,8 +512,17 @@ namespace data {
             Vector3 headScreen = WorldToScreenPoint(viewMatrix, headWorld);
             if (headScreen.z < 0.001f) continue;
 
-            Vector3 toeScreen = boneScreen(span.at<uint64_t>(Offsets::Bone_LeftToe));
-            if (toeScreen.z < 0.001f) continue;
+            uint64_t toeNode = span.at<uint64_t>(Offsets::Bone_LeftToe);
+            Vector3 toeScreen = toeNode ? boneScreen(toeNode) : Vector3::Zero();
+            if (toeScreen.z < 0.001f || toeScreen == Vector3::Zero()) {
+                Vector3 toeWorld = headWorld;
+                toeWorld.y -= 1.8f;
+                toeScreen = WorldToScreenPoint(viewMatrix, toeWorld);
+                if (toeScreen.z < 0.001f) {
+                    float estimatedHeight = (g_sh * 1.8f) / std::max(1.0f, dist * 1.2f);
+                    toeScreen = Vector3(headScreen.x, headScreen.y + estimatedHeight, headScreen.z);
+                }
+            }
 
             // Knocked / Downed state detection (PhyXData 0x1D60 -> MaybeDead 0x20 -> IsKnocked 0x10 == 8)
             bool isKnocked = false;

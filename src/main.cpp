@@ -18,6 +18,7 @@
 // ============================================================================
 
 #include "Android_draw/draw.h"
+#include "Android_touch/TouchHelperA.h"
 #include "ui/menu.hpp"
 #include "protect/license.hpp"
 #include "other/memory.hpp"
@@ -213,7 +214,9 @@ static int start_overlay() {
         global_anim_time += 0.016f;
 
         drawBegin();            // Prepares new ImGui frame & polls orientation
+        Touch_ClearUiRects();
         ui::menu::render();     // Renders ImGui menu, floating logo, and calls func::esp::draw()
+        Touch_CommitUiRects();
         drawEnd();              // Swaps EGL buffers onto native display
 
         auto frame_end = std::chrono::steady_clock::now();

@@ -364,8 +364,8 @@ namespace ui::menu {
             ImVec2 winPos = ImVec2(s_circle_pos.x - logoRadius, s_circle_pos.y - logoRadius);
             ImVec2 winSize = ImVec2(logoDiameter, logoDiameter);
 
-            // Report UI rect to Touch subsystem so touches on ball do not penetrate to game
-            Touch_SetUiRect(winPos.x, winPos.y, winSize.x, winSize.y, true);
+            // Register circular UI touch barrier matching Kernel reference
+            Touch_AddUiCircle(s_circle_pos.x, s_circle_pos.y, logoRadius + 10.0f * ui_scale);
 
             ImGui::SetNextWindowPos(winPos, ImGuiCond_Always);
             ImGui::SetNextWindowSize(winSize, ImGuiCond_Always);
@@ -387,7 +387,7 @@ namespace ui::menu {
                 ImVec2 center = s_circle_pos;
                 const ImVec2 mouse = io.MousePos;
 
-                ImGui::SetCursorScreenPos(winPos);
+                ImGui::SetCursorPos(ImVec2(0, 0));
                 bool clicked = ImGui::InvisibleButton("##CircleHitbox", winSize);
                 const bool active  = ImGui::IsItemActive();
                 const bool deactivated = ImGui::IsItemDeactivated();
@@ -401,21 +401,16 @@ namespace ui::menu {
                     s_moved_drag = false;
                 }
 
-                if (active && !s_is_dragging) {
+                if (active && s_was_activated) {
                     float dx = mouse.x - s_touch_start_pos.x;
                     float dy = mouse.y - s_touch_start_pos.y;
-                    if ((dx * dx + dy * dy) > (10.0f * 10.0f)) {
+                    const float dragSlop = 22.0f * ui_scale;
+                    if (s_moved_drag || std::hypot(dx, dy) > dragSlop) {
                         s_is_dragging = true;
                         s_moved_drag = true;
+                        s_circle_pos.x = std::clamp(mouse.x - s_drag_offset.x, margin + logoRadius, realW - logoRadius - margin);
+                        s_circle_pos.y = std::clamp(mouse.y - s_drag_offset.y, margin + logoRadius, realH - logoRadius - margin);
                     }
-                }
-
-                if (s_is_dragging && active) {
-                    s_circle_pos.x = mouse.x - s_drag_offset.x;
-                    s_circle_pos.y = mouse.y - s_drag_offset.y;
-
-                    s_circle_pos.x = std::max(margin + logoRadius, std::min(s_circle_pos.x, realW - logoRadius - margin));
-                    s_circle_pos.y = std::max(margin + logoRadius, std::min(s_circle_pos.y, realH - logoRadius - margin));
                 }
 
                 // Smooth tap toggle without artificial startup delays
@@ -484,12 +479,8 @@ namespace ui::menu {
         ImGui::SetNextWindowSize(ImVec2(winW, winH), ImGuiCond_Always);
         ImGui::SetNextWindowPos(s_menu_pos, ImGuiCond_Always);
 
-        // Pre-register touch barrier for exact visible on-screen region
-        float uiLeft   = std::max(0.0f, s_menu_pos.x);
-        float uiTop    = std::max(0.0f, s_menu_pos.y);
-        float uiRight  = std::min(realW, s_menu_pos.x + winW);
-        float uiBottom = std::min(realH, s_menu_pos.y + winH);
-        Touch_SetUiRect(uiLeft, uiTop, std::max(0.0f, uiRight - uiLeft), std::max(0.0f, uiBottom - uiTop), true);
+        // Register rectangular UI touch barrier matching Kernel reference
+        Touch_AddUiRect(s_menu_pos.x, s_menu_pos.y, winW, winH);
 
         // Styling: Pure Pitch Black & Clean Green Accents
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.039f, 0.043f, 0.051f, 0.98f));
@@ -549,7 +540,7 @@ namespace ui::menu {
             // Drag area across header (except right buttons)
             const float btnSize = 32.0f * ui_scale;
             const float rightButtonsWidth = btnSize + 14.0f * ui_scale;
-            ImGui::SetCursorScreenPos(curWinPos);
+            ImGui::SetCursorPos(ImVec2(0, 0));
             ImGui::InvisibleButton("##HeaderDragZone", ImVec2(curWinSize.x - rightButtonsWidth - 10.0f, headerH));
             if (ImGui::IsItemActive()) {
                 s_menu_pos.x += io.MouseDelta.x;
@@ -567,7 +558,6 @@ namespace ui::menu {
                 menu_open = false;
                 s_circle_pos = ImVec2(std::clamp(s_menu_pos.x + logoRadius + 8.0f, margin + logoRadius, realW - logoRadius - margin),
                                       std::clamp(s_menu_pos.y + logoRadius + 8.0f, margin + logoRadius, realH - logoRadius - margin));
-                Touch_SetUiRect(s_circle_pos.x - logoRadius, s_circle_pos.y - logoRadius, logoDiameter, logoDiameter, true);
             }
 
             // ----------------------------------------------------------------

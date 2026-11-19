@@ -305,7 +305,9 @@ inline uint64_t get_lib() {
 
     char buf[8192];
     long tr = 0;
-    uint64_t bs = 0;
+    uint64_t candidates[8] = {0};
+    int candCount = 0;
+    uint64_t firstMatch = 0;
 
     while (true) {
         long nr = sys::read(mfd, buf + tr, sizeof(buf) - tr - 1);
@@ -353,11 +355,17 @@ inline uint64_t get_lib() {
                         for (int i = 0; i < ll && ph[i]; i++) {
                             if (ph[i] != lu[i]) { mt = false; break; }
                         }
-                        if (mt && (en - st) < 0x5100000) {
-                            bs = st;
-                            sys::close(mfd);
-                            wipe(buf, sizeof(buf));
-                            return bs;
+                        if (mt) {
+                            if (firstMatch == 0) firstMatch = st;
+
+                            // Verify ELF magic header: 0x7F 'E' 'L' 'F' (0x464C457F)
+                            uint32_t magic = rpm<uint32_t>(st);
+                            if (magic == 0x464C457F) {
+                                if (candCount < 8) {
+                                    candidates[candCount++] = st;
+                                }
+                            }
+                            break;
                         }
                         ph++;
                     }
@@ -379,6 +387,28 @@ inline uint64_t get_lib() {
 
     sys::close(mfd);
     wipe(buf, sizeof(buf));
-    return bs;
+
+    // Forensic candidate validation matching STORM_MODS FindCorrectLibBase()
+    // Test if candidate base resolves GameFacade static pointer (> 0x10000000)
+    for (int i = 0; i < candCount; i++) {
+        uint64_t cand = candidates[i];
+        if (cand == 0) continue;
+        uint64_t gf1 = rpm<uint64_t>(cand + 0xAD68E18); // maxff.h primary
+        if (gf1 > 0x10000000) {
+            return cand;
+        }
+        uint64_t gf2 = rpm<uint64_t>(cand + 0xAD6DC18); // STORM_MODS alt
+        if (gf2 > 0x10000000) {
+            return cand;
+        }
+    }
+
+    // Fallback 1: Return first verified ELF segment
+    if (candCount > 0) {
+        return candidates[0];
+    }
+
+    // Fallback 2: Return first readable libil2cpp segment
+    return firstMatch;
 }
 
