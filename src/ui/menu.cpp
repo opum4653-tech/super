@@ -573,18 +573,9 @@ namespace ui::menu {
                     }
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawSectionHeader(cdl, "System & Game Diagnostics", ui_scale);
+                    DrawSectionHeader(cdl, "System Status", ui_scale);
 
-                    ImGui::Text("Target PID: %d", static_cast<int>(proc::pid));
-                    if (proc::lib) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "module base: 0x%lx", (unsigned long)proc::lib);
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Waiting for Free Fire...");
-                    }
-
-                    ImGui::Text("Overlay FPS: %.1f", io.Framerate);
-                    ImGui::Text("Resolution: %.0f x %.0f", realW, realH);
-                    ImGui::Text("Architecture: Direct DMA Kernel Memory");
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Status: System Active");
                     ImGui::Text("Screen Capture: Stealth / Clean Stream");
 
                     handleTouchScroll();

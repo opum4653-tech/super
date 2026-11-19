@@ -22,9 +22,6 @@
 extern float global_anim_time;
 std::atomic<bool> main_thread_flag{true};
 
-// Defined next to mask_process_name below; used by the render-loop heartbeat.
-static bool self_is_traced();
-
 static bool check_license_gate(int argc, char** argv) {
     lic::init();
 
@@ -165,29 +162,13 @@ static int start_overlay() {
     });
     attach_worker.detach();
 
-    //  MAIN LOOP — RENDER LOOP (MINIMAL LOGGING)
-    int dbgCounter = 0;
+    // MAIN RENDER LOOP
     while (main_thread_flag) {
         global_anim_time += 0.016f;
         drawBegin();
         ui::menu::render();
         drawEnd();
         usleep(16000);
-
-// PERIODIC DAEMON HEARTBEAT (EVERY ~5 SECONDS)
-        if (++dbgCounter >= 300) {
-            dbgCounter = 0;
-
-            // Re-read TracerPid, then re-assert the seal. If something attached
-            // mid-session, drop out of the loop — the teardown below still runs,
-            // so the settings write is put back.
-            bool traced = self_is_traced();
-            prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
-            if (traced) {
-                main_thread_flag = false;
-                break;
-            }
-        }
     }
 
     shutdown();
@@ -212,26 +193,6 @@ static void mask_process_name(int argc, char** argv, const char* fake_name) {
     }
 }
 
-// True when a debugger is attached to this process. One openat + one read of
-// our own /proc/self/status, parsed in a stack buffer, descriptor closed on
-// every path — nothing opened stays open, nothing hits storage.
-static bool self_is_traced() {
-    int fd = sys::openat(AT_FDCWD, oxorany("/proc/self/status"), O_RDONLY);
-    if (fd < 0) return false;
-
-    char buf[1024];
-    long n = sys::read(fd, buf, sizeof(buf) - 1);
-    sys::close(fd);
-    if (n <= 0) return false;
-    buf[n] = '\0';
-
-    const char* p = strstr(buf, oxorany("TracerPid:"));
-    if (!p) return false;
-    p += 9;
-    while (*p == ' ' || *p == '\t') p++;
-    return atoi(p) != 0;
-}
-
 int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -239,14 +200,6 @@ int main(int argc, char** argv) {
     // Mask process name immediately upon entry to gemini-cli
     mask_process_name(argc, argv, "gemini-cli");
 
-    // The process runs privileged, so nothing else gets to look inside it.
-    // Read TracerPid first (while our own /proc entries are still ours), then
-    // seal: PR_SET_DUMPABLE 0 removes the core-dump path, denies ptrace, and
-    // makes /proc/<pid>/{mem,maps,fd,environ,cmdline,status} root-owned instead
-    // of ours — an ordinary process opens them and gets EACCES.
-    if (self_is_traced()) {
-        return 1;                   // attached before we even started: leave quietly
-    }
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
 
     if (!check_license_gate(argc, argv)) {

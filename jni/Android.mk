@@ -93,9 +93,10 @@ LOCAL_C_INCLUDES := \
 # ═══════════════════════════════════════════════════════════
 #  C++ FLAGS
 # ═══════════════════════════════════════════════════════════
-LOCAL_CFLAGS += -DUSE_OPENGL
+LOCAL_CFLAGS += -DUSE_OPENGL -DNDEBUG
 LOCAL_CPPFLAGS := \
     -DUSE_OPENGL \
+    -DNDEBUG \
     -std=c++17 \
     -fexceptions \
     -frtti \
