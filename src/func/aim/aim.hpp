@@ -59,14 +59,9 @@ namespace aimbot {
             return;
         }
 
-        // Record target diagnostic telemetry
+        // Target screen position tracking
         g_currentTarget.valid = true;
-        snprintf(g_currentTarget.name, sizeof(g_currentTarget.name), "%s",
-                 acq.target.name[0] ? acq.target.name : (acq.target.isBot ? "BOT" : "Player"));
-        g_currentTarget.distance = acq.target.distance;
-        g_currentTarget.hp = static_cast<int>(acq.target.curHP);
         g_currentTarget.screenPos = acq.bestScreenPos;
-        g_currentTarget.headWorld = acq.target.headWorld;
 
         // Headshot evaluation & collider mapping
         bool lockToHead = evaluate_headshot(acq.target, acq.isScoping);

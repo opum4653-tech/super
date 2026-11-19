@@ -23,11 +23,7 @@ namespace aimbot {
 
     struct TargetInfo {
         bool valid = false;
-        char name[36] = {0};
-        float distance = 0.0f;
-        int hp = 0;
         Vector3 screenPos = Vector3::Zero();
-        Vector3 headWorld = Vector3::Zero();
     };
 
     inline TargetInfo g_currentTarget;
