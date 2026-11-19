@@ -1,10 +1,11 @@
-# AGENTS.md — crack_master (NINMODS KPM Kernel Engine)
+# AGENTS.md — crack_master (NINMODS External Mod)
 
-Native Android ARM64 Ring-0 Kernel Patch Module (KPM) overlay engine. `gemini-cli` operates
-strictly via kernel drivers (Dual-Engine KPM: TB KPM `0x63687501` and Neo KPM `0x4E41`, plus RT DEV),
-with zero userland external RPM/WPM footprint (`process_vm_readv` eliminated). It attaches to the
-game process via ring-0 kernel memory copying, resolves module base addresses using driver ELF magic
-verification, and renders via Native Surface (`ANativeWindow`) with Dear ImGui.
+Native Android ARM64 read/write overlay. `gemini-cli` is the external mod binary:
+it attaches to a game process, resolves offsets at runtime, draws an ImGui overlay,
+and gates startup behind a license check.
+
+Two engines exist in the NINMODS system. This repo is the **external** one
+(`gemini-cli`). The kernel engine (`ninmods-kernel`) is not here.
 
 ## Build
 

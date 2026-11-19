@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <sys/uio.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include "../protect/oxorany.hpp"
-#include "driver.h"
 
 namespace proc {
     inline int      pid = -1;
@@ -14,21 +14,10 @@ namespace proc {
     // Last target pid that was confirmed by name. get_pid() re-checks this one
     // entry instead of re-walking all of /proc on every poll.
     inline int      pid_cache = 0;
-    inline int      pm  = -1;   // Legacy compatibility
+    // proc::pm removido — pagemap FD ficava aberto e nunca era lido,
+    // deixando um handle pro /proc/<pid>/pagemap detectável em /proc/self/fd.
+    inline int      pm  = -1;   // mantido só pra código legado, sempre = -1
 }
-
-#ifdef SYS_openat
-#undef SYS_openat
-#endif
-#ifdef SYS_close
-#undef SYS_close
-#endif
-#ifdef SYS_read
-#undef SYS_read
-#endif
-#ifdef SYS_getdents64
-#undef SYS_getdents64
-#endif
 
 namespace sys {
     #if defined(__aarch64__)
@@ -36,11 +25,15 @@ namespace sys {
     static constexpr long SYS_close      = 57;
     static constexpr long SYS_read       = 63;
     static constexpr long SYS_getdents64 = 61;
+    static constexpr long SYS_vm_read    = 270;
+    static constexpr long SYS_vm_write   = 271;
     #elif defined(__x86_64__)
     static constexpr long SYS_openat     = 257;
     static constexpr long SYS_close      = 3;
     static constexpr long SYS_read       = 0;
     static constexpr long SYS_getdents64 = 217;
+    static constexpr long SYS_vm_read    = 310;
+    static constexpr long SYS_vm_write   = 311;
     #endif
 
     #ifndef AT_FDCWD
@@ -78,6 +71,12 @@ namespace sys {
     static inline int  close (int fd)                        { return static_cast<int>(sc6(SYS_close, fd, 0, 0, 0, 0, 0)); }
     static inline long read  (int fd, void* b, size_t c)     { return sc6(SYS_read, fd, reinterpret_cast<long>(b), c, 0, 0, 0); }
     static inline long getdents64(int fd, void* d, size_t c) { return sc6(SYS_getdents64, fd, reinterpret_cast<long>(d), c, 0, 0, 0); }
+    static inline long vm_read (int pid, struct iovec* l, unsigned long lc, struct iovec* r, unsigned long rc) {
+        return sc6(SYS_vm_read, pid, reinterpret_cast<long>(l), lc, reinterpret_cast<long>(r), rc, 0);
+    }
+    static inline long vm_write(int pid, struct iovec* l, unsigned long lc, struct iovec* r, unsigned long rc) {
+        return sc6(SYS_vm_write, pid, reinterpret_cast<long>(l), lc, reinterpret_cast<long>(r), rc, 0);
+    }
 }
 
 struct linux_dirent64 {
@@ -88,7 +87,7 @@ struct linux_dirent64 {
     char d_name[];
 };
 
-// Wipe stack buffers after use
+// Wipe stack buffers depois de usar — nada de path linger em snapshots de memória.
 static inline void wipe(void* p, size_t n) {
     volatile uint8_t* v = reinterpret_cast<volatile uint8_t*>(p);
     for (size_t i = 0; i < n; i++) v[i] = 0;
@@ -98,21 +97,31 @@ inline bool is_valid_ptr(uint64_t a) {
     return (a >= 0x10000000ULL && a <= 0x7FFFFFFFFFFFULL);
 }
 
-inline bool addr_valid(uint64_t a) { return a >= 0x1000; }
+inline bool addr_valid(uint64_t a) { return is_valid_ptr(a); }
 
-// ==================== PURE KPM KERNEL MEMORY BRIDGE ====================
 inline bool mem_read(uint64_t a, void* b, size_t l) {
-    if (proc::pid <= 0 || a < 0x1000 || l == 0 || b == nullptr) return false;
-    if (!driver) return false;
-    driver->initialize(proc::pid);
-    return driver->read(a, b, l);
+    if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
+    struct iovec loc[1], rem[1];
+    loc[0].iov_base = b;
+    loc[0].iov_len  = l;
+    rem[0].iov_base = reinterpret_cast<void*>(a);
+    rem[0].iov_len  = l;
+    ssize_t r = sys::vm_read(proc::pid, loc, 1, rem, 1);
+    if (r != static_cast<long>(l)) {
+        memset(b, 0, l);
+        return false;
+    }
+    return true;
 }
 
 inline bool mem_write(uint64_t a, const void* b, size_t l) {
-    if (proc::pid <= 0 || a == 0 || l == 0 || b == nullptr) return false;
-    if (!driver) return false;
-    driver->initialize(proc::pid);
-    return driver->write(a, const_cast<void*>(b), l);
+    if (proc::pid <= 0 || !is_valid_ptr(a) || l == 0 || b == nullptr) return false;
+    struct iovec loc[1], rem[1];
+    loc[0].iov_base = const_cast<void*>(b);
+    loc[0].iov_len  = l;
+    rem[0].iov_base = reinterpret_cast<void*>(a);
+    rem[0].iov_len  = l;
+    return sys::vm_write(proc::pid, loc, 1, rem, 1) == static_cast<long>(l);
 }
 
 template<typename T> inline T rpm(uint64_t a) {
@@ -125,31 +134,8 @@ template<typename T> inline bool wpm(uint64_t a, const T& d) {
     return mem_write(a, &d, sizeof(T));
 }
 
-// Single-pass chunk reader for high-throughput batch reading
-struct MemChunk {
-    uint64_t base;
-    size_t   size;
-    uint8_t  buf[0x2400];
-    bool     ok;
-
-    inline bool load(uint64_t addr, size_t len) {
-        if (len > sizeof(buf)) len = sizeof(buf);
-        base = addr;
-        size = len;
-        ok   = mem_read(addr, buf, len);
-        return ok;
-    }
-
-    template<typename T>
-    inline T at(size_t off) const {
-        T v{};
-        if (!ok || off + sizeof(T) > size) return v;
-        memcpy(&v, buf + off, sizeof(T));
-        return v;
-    }
-};
-
-// Confirm cached PID is still alive and matches the target package
+// Confirm one cached pid still belongs to the target. One openat + one read,
+// versus a getdents64 sweep of every entry in /proc.
 inline bool pid_alive(int pid) {
     if (pid <= 0) return false;
 
@@ -189,25 +175,17 @@ inline bool pid_alive(int pid) {
 }
 
 inline int get_pid() {
-    // 1. Neo KPM Kernel-level PID extraction (zero /proc footprint)
-    if (driver) {
-        int kpm_pid = driver->get_pid_from_kpm("com.dts.freefiremax");
-        if (kpm_pid <= 0) {
-            kpm_pid = driver->get_pid_from_kpm("com.dts.freefireth");
-        }
-        if (kpm_pid > 0) {
-            proc::pid_cache = kpm_pid;
-            return kpm_pid;
-        }
-    }
-
-    // 2. Fast path: cached PID validation
+    // Fast path — the previously confirmed target, still alive and still ours.
+    // PID reuse is caught because the name has to match again, not just the number.
     if (proc::pid_cache > 0 && pid_alive(proc::pid_cache)) {
         return proc::pid_cache;
     }
     proc::pid_cache = 0;
 
-    // 3. Cooldown after failed sweep to prevent timer fingerprinting
+    // Cooldown after a failed sweep. Reading every /proc/<pid>/cmdline on a timer
+    // is a signature of its own, and the target is not going to materialise within
+    // a couple of seconds of the last time we looked. The interval drifts so the
+    // scan does not land on a fixed period.
     static long long s_next_scan_ms = 0;
     static unsigned  s_scan_seq     = 0;
     struct timespec ts;
@@ -250,7 +228,7 @@ inline int get_pid() {
                     cp[ps] = '\0';
 
                     int cfd = sys::openat(AT_FDCWD, cp, O_RDONLY);
-                    wipe(cp, sizeof(cp));
+                    wipe(cp, sizeof(cp));                       // scrub path
                     if (cfd >= 0) {
                         char cmd[256] = {0};
                         long b = sys::read(cfd, cmd, sizeof(cmd) - 1);
@@ -262,12 +240,13 @@ inline int get_pid() {
                                 strstr(cmd, oxorany("com.dts.freefiremax"))) {
                                 found = pid;
                             }
-                            wipe(cmd, sizeof(cmd));
+                            wipe(cmd, sizeof(cmd));             // scrub cmdline
                         }
                     }
                     if (found > 0) break;
                 }
             }
+
             p += e->d_reclen;
         }
         if (found > 0) break;
@@ -284,55 +263,106 @@ inline int get_pid() {
     return found;
 }
 
-// Module base address resolution via KPM Kernel driver
 inline uint64_t get_lib() {
     if (proc::pid <= 0) return 0;
-    if (!driver) return 0;
-    driver->initialize(proc::pid);
-    return driver->getModuleBase("libil2cpp.so");
-}
 
-inline void init_mem() { /* Legacy compatibility */ }
+    char mp[64];
+    int ps = 0;
+    const char* ps_ = oxorany("/proc/");
+    while (*ps_) mp[ps++] = *ps_++;
 
-namespace game {
-    inline int  tick        = 0;
-    inline int  jitter_next = 47;
+    int pid = proc::pid;
+    char pds[16];
+    int pl = 0;
+    int tm = pid;
+    while (tm > 0) { pds[pl++] = '0' + (tm % 10); tm /= 10; }
+    for (int i = pl - 1; i >= 0; i--) mp[ps++] = pds[i];
 
-    inline bool valid() {
-        if (proc::pid <= 0) {
-            proc::pid = get_pid();
-            if (proc::pid <= 0) return false;
-        }
+    const char* ms = oxorany("/maps");
+    while (*ms) mp[ps++] = *ms++;
+    mp[ps] = '\0';
 
-        if (proc::lib == 0) {
-            proc::lib = get_lib();
-            return false;
-        }
+    int mfd = sys::openat(AT_FDCWD, mp, O_RDONLY);
+    wipe(mp,  sizeof(mp));
+    wipe(pds, sizeof(pds));
+    if (mfd < 0) return 0;
 
-        tick++;
-        if (tick >= jitter_next) {
-            int p = get_pid();
-            if (p != proc::pid) {
-                proc::pid = p;
-                if (proc::pid > 0 && driver) driver->initialize(proc::pid);
-                proc::lib = 0;
-                tick = 0;
-                jitter_next = 47;
-                return false;
+    char buf[8192];
+    long tr = 0;
+    uint64_t bs = 0;
+
+    while (true) {
+        long nr = sys::read(mfd, buf + tr, sizeof(buf) - tr - 1);
+        if (nr <= 0) break;
+        tr += nr;
+        buf[tr] = '\0';
+
+        char* ls = buf;
+        while (true) {
+            char* le = ls;
+            while (*le && *le != '\n') le++;
+            if (*le == '\0') break;
+
+            *le = '\0';
+
+            uint64_t st = 0, en = 0;
+            char* pt = ls;
+
+            while (*pt && ((*pt >= '0' && *pt <= '9') || (*pt >= 'a' && *pt <= 'f') || (*pt >= 'A' && *pt <= 'F'))) {
+                uint64_t v = (*pt <= '9') ? (*pt - '0') : ((*pt >= 'a') ? (*pt - 'a' + 10) : (*pt - 'A' + 10));
+                st = st * 16 + v;
+                pt++;
             }
-            tick = 0;
-            static uint32_t s = 0xC5A1B4E7u;
-            s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-            jitter_next = 40 + (int)(s % 31u);
+            if (*pt != '-') goto nl;
+            pt++;
+            while (*pt && ((*pt >= '0' && *pt <= '9') || (*pt >= 'a' && *pt <= 'f') || (*pt >= 'A' && *pt <= 'F'))) {
+                uint64_t v = (*pt <= '9') ? (*pt - '0') : ((*pt >= 'a') ? (*pt - 'a' + 10) : (*pt - 'A' + 10));
+                en = en * 16 + v;
+                pt++;
+            }
+            while (*pt == ' ') pt++;
+
+            if (pt[0] == 'r' && pt[3] == 'p') {
+                while (*pt == ' ') pt++;
+                while (*pt && *pt != '/') pt++;
+
+                if (*pt == '/') {
+                    const char* lu = oxorany("libil2cpp.so");
+                    int ll = 0;
+                    while (lu[ll]) ll++;
+
+                    char* ph = pt;
+                    while (*ph) {
+                        bool mt = true;
+                        for (int i = 0; i < ll && ph[i]; i++) {
+                            if (ph[i] != lu[i]) { mt = false; break; }
+                        }
+                        if (mt && (en - st) < 0x5100000) {
+                            bs = st;
+                            sys::close(mfd);
+                            wipe(buf, sizeof(buf));
+                            return bs;
+                        }
+                        ph++;
+                    }
+                }
+            }
+
+        nl:
+            ls = le + 1;
         }
-        return true;
+
+        if (ls < buf + tr) {
+            int rm = (buf + tr) - ls;
+            for (int i = 0; i < rm; i++) buf[i] = ls[i];
+            tr = rm;
+        } else {
+            tr = 0;
+        }
     }
 
-    inline void init() {
-        proc::pid = get_pid();
-        if (proc::pid > 0) {
-            if (driver) driver->initialize(proc::pid);
-            proc::lib = get_lib();
-        }
-    }
+    sys::close(mfd);
+    wipe(buf, sizeof(buf));
+    return bs;
 }
+

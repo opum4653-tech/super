@@ -138,10 +138,9 @@ static int start_overlay() {
         while (main_thread_flag) {
             proc::pid = get_pid();
             if (proc::pid > 0) {
-                if (driver) driver->initialize(proc::pid);
                 proc::lib = get_lib();
                 if (proc::lib > 0) {
-                    // Verify memory via KPM
+                    // Verify memory
                     uint32_t elfMagic = rpm<uint32_t>(proc::lib);
                     if (elfMagic == 0x464C457F) {
                         data::thread_start();
@@ -237,9 +236,8 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
-    // Mask process name immediately upon entry to kernel worker stealth
-    mask_process_name(argc, argv, "kworker/u16:1");
-    prctl(PR_SET_NAME, "kworker/u16:1", 0, 0, 0);
+    // Mask process name immediately upon entry to gemini-cli
+    mask_process_name(argc, argv, "gemini-cli");
 
     // The process runs privileged, so nothing else gets to look inside it.
     // Read TracerPid first (while our own /proc entries are still ours), then
