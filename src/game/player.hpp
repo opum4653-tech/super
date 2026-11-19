@@ -27,7 +27,8 @@ struct PlayerData {
     // 2D Screen Space Coordinates (Projected from 3D via WorldToScreenPoint)
     Vector3  Head;          // Projected Head position (x, y = screen pixels, z = W2S depth factor)
     Vector3  Toe;           // Projected LeftToe position (used for bottom-of-box calculation)
-    Vector3  headWorld;     // Unprojected 3D World Space coordinates (used for 3D Silent Aim trajectory)
+    Vector3  headWorld;     // Unprojected 3D Head World Space coordinates (used for 3D Silent Aim trajectory)
+    Vector3  hipWorld;      // Unprojected 3D Hip World Space coordinates (used for Chest / Body targeting)
 
     // Entity State & Gameplay Meta
     bool     isVisible;     // True if player mesh is visible to local camera (Avatar::Uma_Visible)
@@ -45,7 +46,7 @@ struct PlayerData {
 
     PlayerData()
         : addr(0),
-          Head(Vector3::Zero()), Toe(Vector3::Zero()), headWorld(Vector3::Zero()),
+          Head(Vector3::Zero()), Toe(Vector3::Zero()), headWorld(Vector3::Zero()), hipWorld(Vector3::Zero()),
           isVisible(false), isBot(false), isKnocked(false), distance(0.f),
           curHP(0), maxHP(0), curArmor(0),
           isFiring(false), isGrounded(true), speed(0.f),

@@ -48,22 +48,26 @@ namespace aimbot {
             return; // Never compute trajectory from invalid/zero origin
         }
 
+        // Calculate target 3D world position (matching STORM_MODS bone targeting mechanics)
         Vector3 target3D = target.headWorld;
         if (target3D == Vector3::Zero() || !std::isfinite(target3D.x) || !std::isfinite(target3D.y) || !std::isfinite(target3D.z)) {
             return;
         }
 
-        // Apply target bone height adjustments
+        Vector3 hipPos = target.hipWorld;
+        bool hasHip = (hipPos != Vector3::Zero() && std::isfinite(hipPos.x) && std::isfinite(hipPos.y) && std::isfinite(hipPos.z));
+        Vector3 chestPos = hasHip ? (target3D + (hipPos - target3D) * 0.35f) : (target3D - Vector3(0.0f, 0.28f, 0.0f));
+        Vector3 pelvisPos = hasHip ? hipPos : (target3D - Vector3(0.0f, 0.55f, 0.0f));
+
         if (cfg::aim::target_bone == 1) {
-            target3D.y -= 0.15f; // Neck / Upper Chest
+            target3D = chestPos; // Neck / Chest (STORM_MODS)
         } else if (cfg::aim::target_bone == 2) {
-            target3D.y -= 0.40f; // Body / Pelvis
+            target3D = pelvisPos; // Body / Pelvis (STORM_MODS)
         } else {
             // Target bone 0 (Head):
             if (!lockToHead) {
-                target3D.y -= 0.28f; // Chest on non-headshot rolls
+                target3D = chestPos; // Chest on non-headshot rolls (STORM_MODS KillInChest pattern)
             }
-            // When lockToHead is true, target3D stays strictly at target.headWorld
         }
 
         // Compute delta vector

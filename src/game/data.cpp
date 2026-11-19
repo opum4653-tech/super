@@ -240,8 +240,11 @@ namespace data {
         std::vector<PlayerData> tmp;
         tmp.reserve(64);
 
-        // 1. Resolve Base Chain
+        // 1. Resolve Base Chain (Free Fire Max: maxff.h primary 0xAD68E18, STORM_MODS alt 0xAD6DC18)
         auto GfCell = rpm<uint64_t>(proc::lib + oxorany(Offsets::GameFacade));
+        if (!GfCell) {
+            GfCell = rpm<uint64_t>(proc::lib + oxorany(Offsets::Base::GameFacade_Alt));
+        }
         if (!GfCell) return;
         auto GfClass = rpm<uint64_t>(GfCell);
         if (!GfClass) return;
@@ -315,7 +318,7 @@ namespace data {
             return false;
         };
 
-        // Candidate 1: Standard FollowCamera -> Camera -> IntPtr
+        // Candidate 1: Standard FollowCamera (0x698) -> Camera (0x20 in maxff.h) -> IntPtr (0x10) -> Matrix
         Follow = rpm<uint64_t>(localPlayer + Offsets::Player_Camera);
         if (Follow) {
             Cam = rpm<uint64_t>(Follow + Offsets::Camera_Follow);
@@ -325,15 +328,21 @@ namespace data {
             }
         }
 
-        // Candidate 2: FollowCamera + 0x30 -> 0x10
-        if (!matrix_resolved) {
-            Follow = rpm<uint64_t>(localPlayer + 0x690);
-            if (Follow) {
-                Cam = rpm<uint64_t>(Follow + 0x30);
-                if (Cam) {
-                    IntPtr = rpm<uint64_t>(Cam + 0x10);
-                    try_matrix(IntPtr);
-                }
+        // Candidate 2: FollowCamera (0x698) -> Camera (0x30 in STORM_MODS) -> IntPtr (0x10)
+        if (!matrix_resolved && Follow) {
+            Cam = rpm<uint64_t>(Follow + Offsets::Camera_Follow_Alt);
+            if (Cam) {
+                IntPtr = rpm<uint64_t>(Cam + Offsets::Camera_IntPtr);
+                try_matrix(IntPtr);
+            }
+        }
+
+        // Candidate 3: FollowCamera (0x698) -> Camera (0x28) -> IntPtr (0x10)
+        if (!matrix_resolved && Follow) {
+            Cam = rpm<uint64_t>(Follow + 0x28);
+            if (Cam) {
+                IntPtr = rpm<uint64_t>(Cam + Offsets::Camera_IntPtr);
+                try_matrix(IntPtr);
             }
         }
 
@@ -452,6 +461,11 @@ namespace data {
             if (!std::isfinite(headWorld.x) || !std::isfinite(headWorld.y) || !std::isfinite(headWorld.z)) continue;
             if (headWorld.y < -150.0f || headWorld.y > 600.0f) continue;
 
+            // Hip 3D World Position (used for STORM_MODS chest & body targeting math)
+            uint64_t hipNode = span.at<uint64_t>(Offsets::Bone_Hip);
+            Vector3 hipWorld = Vector3::Zero();
+            if (hipNode) hipWorld = GetNodePosition(hipNode);
+
             float dist = calculate_distance(localPos, headWorld);
             if (dist < 0.8f || dist > cfg::esp::max_range) continue;
 
@@ -482,6 +496,7 @@ namespace data {
             pd.Head       = headScreen;
             pd.Toe        = toeScreen;
             pd.headWorld  = headWorld;
+            pd.hipWorld   = hipWorld;
             pd.isVisible  = visible;
             pd.isBot      = isBot;
             pd.isKnocked  = isKnocked;

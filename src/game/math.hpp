@@ -84,14 +84,39 @@ inline Vector3 GetNodePosition(uint64_t nodeTransform) {
 }
 
 // ----------------------------------------------------------------------------
-// BONE NODE ACCESSORS
+// BONE NODE ACCESSORS (FREE FIRE MAX)
 // ----------------------------------------------------------------------------
 inline uint64_t GetPlayerHeadTF(uint64_t player) {
     return rpm<uint64_t>(player + Offsets::Bone_Head);
 }
 
+inline uint64_t GetPlayerHipTF(uint64_t player) {
+    return rpm<uint64_t>(player + Offsets::Bone_Hip);
+}
+
 inline uint64_t GetPlayerPeTF(uint64_t player) {
-    return rpm<uint64_t>(player + Offsets::Bone_LeftToe);
+    return rpm<uint64_t>(player + Offsets::Bone_Root);
+}
+
+// Inverts the 4x4 camera view matrix to obtain the 3D camera world origin (from STORM_MODS)
+inline Vector3 GetCameraPosition(const matrix& m) {
+    float a11 = m.m11, a12 = m.m21, a13 = m.m31;
+    float a21 = m.m12, a22 = m.m22, a23 = m.m32;
+    float a31 = m.m14, a32 = m.m24, a33 = m.m34;
+    float b1  = -m.m41, b2 = -m.m42, b3 = -m.m44;
+
+    float det = a11 * (a22 * a33 - a23 * a32)
+                - a12 * (a21 * a33 - a23 * a31)
+                + a13 * (a21 * a32 - a22 * a31);
+
+    if (fabsf(det) < 0.0001f) return Vector3::Zero();
+    float inv = 1.0f / det;
+
+    return Vector3(
+        (b1 * (a22 * a33 - a23 * a32) - a12 * (b2 * a33 - a23 * b3) + a13 * (b2 * a32 - a22 * b3)) * inv,
+        (a11 * (b2 * a33 - a23 * b3) - b1 * (a21 * a33 - a23 * a31) + a13 * (a21 * b3 - b2 * a31)) * inv,
+        (a11 * (a22 * b3 - b2 * a32) - a12 * (a21 * b3 - b2 * a31) + b1 * (a21 * a32 - a22 * a31)) * inv
+    );
 }
 
 // ----------------------------------------------------------------------------

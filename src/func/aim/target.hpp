@@ -54,14 +54,24 @@ namespace aimbot {
         }
         result.isFiring = isFiring;
 
-        // FollowCamera is at localPlayer + 0x690. Inside FollowCamera, FOVOffset is at 0x84!
+        // FollowCamera is at localPlayer + Offsets::Player::Camera (0x698 in Free Fire Max). FOVOffset is at 0x84.
         // When scoping (especially sniper rifles like AWM, Kar98, M82B), FOVOffset shifts negative.
         uint64_t followCam = rpm<uint64_t>(localPlayer + Offsets::Player::Camera);
         float camFovOffset = 0.0f;
         if (is_valid_ptr(followCam)) {
             camFovOffset = rpm<float>(followCam + Offsets::Player::FOVOffset);
         }
-        result.isScoping = (camFovOffset < -0.5f || camFovOffset > 0.5f);
+        bool isScoping = (camFovOffset < -0.5f || camFovOffset > 0.5f);
+
+        // Weapon IsSight (0x8A0) cross-check from STORM_MODS
+        if (!isScoping) {
+            uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player::Weapon);
+            if (is_valid_ptr(weapon)) {
+                uint64_t sightPtr = rpm<uint64_t>(weapon + Offsets::Weapon::IsSight);
+                if (sightPtr != 0) isScoping = true;
+            }
+        }
+        result.isScoping = isScoping;
 
         bool triggerActive = false;
         if (cfg::aim::trigger_mode == 1) {

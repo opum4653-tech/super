@@ -185,8 +185,7 @@ inline bool pid_alive(int pid) {
     bool ok = false;
     if (b > 0) {
         cmd[b] = '\0';
-        ok = (strstr(cmd, oxorany("com.dts.freefireth")) != nullptr)
-          || (strstr(cmd, oxorany("com.dts.freefiremax")) != nullptr);
+        ok = (strstr(cmd, oxorany("com.dts.freefiremax")) != nullptr);
         wipe(cmd, sizeof(cmd));
     }
     return ok;
@@ -254,8 +253,7 @@ inline int get_pid() {
 
                         if (b > 0) {
                             cmd[b] = '\0';
-                            if (strstr(cmd, oxorany("com.dts.freefireth")) ||
-                                strstr(cmd, oxorany("com.dts.freefiremax"))) {
+                            if (strstr(cmd, oxorany("com.dts.freefiremax"))) {
                                 found = pid;
                             }
                             wipe(cmd, sizeof(cmd));             // scrub cmdline

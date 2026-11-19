@@ -26,6 +26,59 @@
 
 namespace aimbot {
 
+    // Real Camera Aim Rotation Assist (AimBot / AimHard from STORM_MODS)
+    // Directly aligns character and crosshair rotation with target bone
+    inline void apply_camera_aim(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool triggerActive) {
+        if (!is_valid_ptr(localPlayer) || !triggerActive) return;
+
+        // Origin point for aim direction (from Camera matrix or local player head)
+        Vector3 camPos = GetCameraPosition(data::viewMatrix);
+        if (camPos == Vector3::Zero()) {
+            uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
+            if (localHead) camPos = GetNodePosition(localHead);
+        }
+        if (camPos == Vector3::Zero() || !std::isfinite(camPos.x)) return;
+
+        // Target bone coordinate
+        Vector3 target3D = target.headWorld;
+        if (target3D == Vector3::Zero() || !std::isfinite(target3D.x)) return;
+
+        Vector3 hipPos = target.hipWorld;
+        bool hasHip = (hipPos != Vector3::Zero() && std::isfinite(hipPos.x));
+        Vector3 chestPos = hasHip ? (target3D + (hipPos - target3D) * 0.35f) : (target3D - Vector3(0.0f, 0.28f, 0.0f));
+        Vector3 pelvisPos = hasHip ? hipPos : (target3D - Vector3(0.0f, 0.55f, 0.0f));
+
+        if (cfg::aim::target_bone == 1) {
+            target3D = chestPos;
+        } else if (cfg::aim::target_bone == 2) {
+            target3D = pelvisPos;
+        } else {
+            if (!lockToHead) {
+                target3D = chestPos;
+            }
+        }
+
+        Vector3 dir = target3D - camPos;
+        if (dir.sqrMagnitude() <= 1e-4f) return;
+
+        Vector3 normDir = SafeNormalize(dir);
+        if (!std::isfinite(normDir.x) || normDir == Vector3::Zero()) return;
+
+        // Calculate target orientation Quaternion
+        Quaternion targetRot = Quaternion::LookRotation(normDir, Vector3(0.0f, 1.0f, 0.0f));
+
+        // Smooth rotation interpolation
+        float smoothVal = cfg::aim::smooth;
+        if (smoothVal <= 1.0f) {
+            wpm<Quaternion>(localPlayer + Offsets::Player::Rotation, targetRot);
+        } else {
+            Quaternion currentRot = rpm<Quaternion>(localPlayer + Offsets::Player::Rotation);
+            float t = std::clamp(1.0f / (smoothVal + 0.1f), 0.05f, 1.0f);
+            Quaternion blended = Quaternion::Slerp(currentRot, targetRot, t);
+            wpm<Quaternion>(localPlayer + Offsets::Player::Rotation, blended);
+        }
+    }
+
     inline std::atomic<bool>& aim_thread_running() {
         static std::atomic<bool> s_run{false};
         return s_run;
@@ -85,8 +138,15 @@ namespace aimbot {
         // Headshot evaluation & collider mapping (strictly fire-gated)
         bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.isFiring);
 
-        // 3D Silent bullet trajectory steering
-        apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
+        // 3D Silent bullet trajectory steering (Aim Silent from STORM_MODS)
+        if (cfg::aim::silent) {
+            apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
+        }
+
+        // Real Camera Aim Rotation Assist (AimBot / AimHard from STORM_MODS)
+        if (cfg::aim::enable) {
+            apply_camera_aim(localPlayer, acq.target, lockToHead, acq.isFiring || acq.triggerActive);
+        }
     }
 
     inline void loop() {
