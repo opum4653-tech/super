@@ -95,7 +95,10 @@ static void DrawCircularLogo(ImDrawList* dl, ImVec2 center, float radius, bool s
 
 // ----------------------------------------------------------------------------
 // NATIVE TOUCH-SCROLL HANDLER (AXIS-LOCKED GESTURE DISCRIMINATION)
+// Aligned with Kernel Project (refer/Kernel/Kernel/src/ui/menu.cpp)
 // ----------------------------------------------------------------------------
+static bool s_touch_scrolling_active = false;
+
 static void handleTouchScroll() {
     ImGuiIO& io = ImGui::GetIO();
     enum GestureState { GESTURE_IDLE, GESTURE_HORIZONTAL, GESTURE_VERTICAL };
@@ -107,7 +110,8 @@ static void handleTouchScroll() {
 
     if (io.MouseDown[0]) {
         if (s_gesture == GESTURE_IDLE) {
-            if (s_active_child == 0 && ImGui::IsWindowHovered()) {
+            // CRITICAL FIX: Allow gesture initiation even when touch starts over active controls (buttons, switches, sliders)
+            if (s_active_child == 0 && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
                 s_touch_start = io.MousePos;
                 s_active_child = child_id;
             }
@@ -120,24 +124,32 @@ static void handleTouchScroll() {
             float abs_dy = std::abs(dy);
 
             if (s_gesture == GESTURE_IDLE) {
-                if (abs_dx >= 6.0f && abs_dx > abs_dy * 1.1f) {
+                if (abs_dx >= 5.0f && abs_dx > abs_dy * 1.1f) {
                     s_gesture = GESTURE_HORIZONTAL;
-                } else if (abs_dy >= 6.0f && abs_dy > abs_dx * 1.1f) {
+                } else if (abs_dy >= 5.0f && abs_dy > abs_dx * 1.1f) {
                     s_gesture = GESTURE_VERTICAL;
+                    s_touch_scrolling_active = true;
+                    ImGui::ClearActiveID(); // Cancel button/slider activation when drag scroll begins
                 }
             }
 
             if (s_gesture == GESTURE_VERTICAL) {
-                ImGui::ClearActiveID();
+                s_touch_scrolling_active = true;
                 float delta_y = io.MouseDelta.y;
                 if (std::abs(delta_y) > 0.01f) {
-                    ImGui::SetScrollY(ImGui::GetScrollY() - delta_y);
+                    float cur_scroll = ImGui::GetScrollY();
+                    float new_scroll = cur_scroll - delta_y;
+                    float max_scroll = ImGui::GetScrollMaxY();
+                    if (new_scroll < 0.0f) new_scroll = 0.0f;
+                    if (new_scroll > max_scroll) new_scroll = max_scroll;
+                    ImGui::SetScrollY(new_scroll);
                 }
             }
         }
     } else {
         s_gesture = GESTURE_IDLE;
         s_active_child = 0;
+        s_touch_scrolling_active = false;
     }
 }
 
@@ -242,7 +254,7 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
     snprintf(btn_id, sizeof(btn_id), "##SwitchBtn_%s", label);
 
     bool pressed = ImGui::InvisibleButton(btn_id, ImVec2(availW, row_height));
-    if (pressed) {
+    if (pressed && !s_touch_scrolling_active) {
         *v = !(*v);
     }
 
@@ -301,27 +313,31 @@ namespace ui::menu {
         if (realW <= 0) realW = 2400.0f;
         if (realH <= 0) realH = 1080.0f;
 
-        // Screen rotation & resolution tracker
+        // Screen rotation & resolution tracker (aligned with Kernel project)
         static int last_orientation = -1;
         static float last_screen_w = 0.0f;
         static float last_screen_h = 0.0f;
         static bool menu_needs_reposition = false;
         static bool pill_needs_reposition = false;
 
-        bool screen_changed = (last_orientation != displayInfo.orientation ||
-                               last_screen_w != realW ||
-                               last_screen_h != realH);
+        int current_orientation = (realW > realH) ? 1 : 0;
+        bool screen_changed = (last_orientation != -1 && (current_orientation != last_orientation ||
+                               std::abs(realW - last_screen_w) > 50.0f ||
+                               std::abs(realH - last_screen_h) > 50.0f));
 
         if (screen_changed) {
-            last_orientation = displayInfo.orientation;
-            last_screen_w = realW;
-            last_screen_h = realH;
             menu_needs_reposition = true;
             pill_needs_reposition = true;
         }
+        last_orientation = current_orientation;
+        last_screen_w = realW;
+        last_screen_h = realH;
 
-        // Dynamic responsive UI scaling (enlarged for modern mobile screens)
-        const float ui_scale = std::max(1.10f, std::min(realH / 1080.0f * 1.30f, 1.70f));
+        // Dynamic responsive UI scaling (aligned with Kernel project: 1.0 at 1080p)
+        float ui_scale = realH / 1080.0f;
+        if (ui_scale < 0.70f) ui_scale = 0.70f;
+        if (ui_scale > 1.35f) ui_scale = 1.35f;
+
         const float logoRadius = 46.0f * ui_scale;
         const float logoDiameter = logoRadius * 2.0f;
         const float margin = 14.0f * ui_scale;
@@ -445,8 +461,9 @@ namespace ui::menu {
         // ====================================================================
         // MAIN OVERLAY WINDOW — ENLARGED TOUCH GEOMETRY
         // ====================================================================
-        const float winW = std::max(560.0f * ui_scale, std::min(720.0f * ui_scale, realW * 0.94f));
-        const float winH = std::max(440.0f * ui_scale, std::min(590.0f * ui_scale, realH * 0.94f));
+        const float headerH = 48.0f * ui_scale;
+        const float winW = std::max(540.0f * ui_scale, std::min(700.0f * ui_scale, realW * 0.92f));
+        const float winH = std::max(420.0f * ui_scale, std::min(580.0f * ui_scale, realH * 0.90f));
 
         static ImVec2 s_menu_pos = ImVec2(-1.0f, -1.0f);
         if (s_menu_pos.x < 0.0f || menu_needs_reposition) {
@@ -454,11 +471,25 @@ namespace ui::menu {
             menu_needs_reposition = false;
         }
 
-        s_menu_pos.x = std::max(0.0f, std::min(s_menu_pos.x, realW - winW));
-        s_menu_pos.y = std::max(0.0f, std::min(s_menu_pos.y, realH - winH));
+        // FULL SCREEN MOVEMENT FREEDOM (Drag anywhere across screen, matching Kernel project)
+        const float minVisibleX = 80.0f * ui_scale;
+        const float minVisibleY = headerH;
+        const float minPosX = -(winW - minVisibleX);
+        const float maxPosX = realW - minVisibleX;
+        const float minPosY = 0.0f;
+        const float maxPosY = realH - minVisibleY;
+        s_menu_pos.x = std::clamp(s_menu_pos.x, minPosX, maxPosX);
+        s_menu_pos.y = std::clamp(s_menu_pos.y, minPosY, maxPosY);
 
         ImGui::SetNextWindowSize(ImVec2(winW, winH), ImGuiCond_Always);
         ImGui::SetNextWindowPos(s_menu_pos, ImGuiCond_Always);
+
+        // Pre-register touch barrier for exact visible on-screen region
+        float uiLeft   = std::max(0.0f, s_menu_pos.x);
+        float uiTop    = std::max(0.0f, s_menu_pos.y);
+        float uiRight  = std::min(realW, s_menu_pos.x + winW);
+        float uiBottom = std::min(realH, s_menu_pos.y + winH);
+        Touch_SetUiRect(uiLeft, uiTop, std::max(0.0f, uiRight - uiLeft), std::max(0.0f, uiBottom - uiTop), true);
 
         // Styling: Pure Pitch Black & Clean Green Accents
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.039f, 0.043f, 0.051f, 0.98f));
@@ -502,13 +533,9 @@ namespace ui::menu {
             ImVec2 curWinPos = ImGui::GetWindowPos();
             ImVec2 curWinSize = ImGui::GetWindowSize();
 
-            // Report full menu rect to Touch subsystem to swallow touch events from the game
-            Touch_SetUiRect(curWinPos.x, curWinPos.y, curWinSize.x, curWinSize.y, true);
-
             // ----------------------------------------------------------------
             // 1. TITLE BAR (CRACK MASTER in Neon Green + [ - ])
             // ----------------------------------------------------------------
-            const float headerH = 48.0f * ui_scale;
             const char* brandTitle = "CRACK MASTER";
 
             // Centered Header Title (Large & Prominent)
@@ -527,8 +554,8 @@ namespace ui::menu {
             if (ImGui::IsItemActive()) {
                 s_menu_pos.x += io.MouseDelta.x;
                 s_menu_pos.y += io.MouseDelta.y;
-                s_menu_pos.x = std::max(0.0f, std::min(s_menu_pos.x, realW - winW));
-                s_menu_pos.y = std::max(0.0f, std::min(s_menu_pos.y, realH - winH));
+                s_menu_pos.x = std::clamp(s_menu_pos.x, minPosX, maxPosX);
+                s_menu_pos.y = std::clamp(s_menu_pos.y, minPosY, maxPosY);
             }
 
             // Top-right button: [ - ] (Enlarged)
@@ -596,8 +623,6 @@ namespace ui::menu {
 
                     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Status: System Active");
                     ImGui::Text("Screen Capture: Stealth / Clean Stream");
-
-                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 1: VISUAL (EXACT REPLICA OF USER SCREENSHOT)
@@ -660,8 +685,6 @@ namespace ui::menu {
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##BoxThickness", &cfg::esp::box_thickness, 1.0f, 5.0f, "%.1f px");
                     ImGui::TextDisabled("Box Border Width");
-
-                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 2: AIMBOT
@@ -715,8 +738,6 @@ namespace ui::menu {
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 1.0f, 25.0f, "%.1f");
                     ImGui::TextDisabled("Aim Smoothness");
-
-                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 3: MOTION
@@ -733,8 +754,6 @@ namespace ui::menu {
                     ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
                     DrawToggleSwitch("Phantom Mode", &cfg::motion::phantom_mode, 48.0f * ui_scale, ui_scale);
                     ImGui::TextDisabled("Ghost / Phantom State Override");
-
-                    handleTouchScroll();
                 }
                 // ============================================================
                 // TAB 4: SETTINGS
@@ -759,9 +778,10 @@ namespace ui::menu {
                     if (ImGui::Button("SAFE EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 48.0f * ui_scale))) {
                         g_should_exit = true;
                     }
-
-                    handleTouchScroll();
                 }
+
+                // Single authoritative touch scroll handler for ##MainContent (swipe anywhere inside menu)
+                handleTouchScroll();
 
                 ImGui::PopStyleVar(3);
             }
