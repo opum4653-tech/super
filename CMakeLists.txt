@@ -29,7 +29,11 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/styles
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/widgets
     ${CMAKE_CURRENT_SOURCE_DIR}/src/func
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/func/esp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/func/aim
     ${CMAKE_CURRENT_SOURCE_DIR}/src/game
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/offsets
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/aim
     ${CMAKE_CURRENT_SOURCE_DIR}/src/other
     ${CMAKE_CURRENT_SOURCE_DIR}/src/protect
 )

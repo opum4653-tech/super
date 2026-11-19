@@ -1,4 +1,6 @@
 #pragma once
+#include <cstdint>
+#include <cstddef>
 #include <GLES2/gl2.h> 
 
 namespace ui::image {

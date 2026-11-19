@@ -6,6 +6,8 @@
 #include "../protect/oxorany.hpp"
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <vector>

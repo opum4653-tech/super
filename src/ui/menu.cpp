@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 using namespace ImGui;
 

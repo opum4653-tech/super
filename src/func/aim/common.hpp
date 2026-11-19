@@ -10,6 +10,7 @@
 #include "../../other/memory.hpp"
 #include "../../other/vector3.h"
 #include <vector>
+#include <mutex>
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
