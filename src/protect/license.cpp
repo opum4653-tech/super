@@ -1,5 +1,27 @@
+// ============================================================================
+// RAM-ONLY HTTPS LICENSE VERIFICATION & HWID ENGINE
+// ============================================================================
+// Project: crack_master
+//
+// SECURITY & ARCHITECTURAL HIGHLIGHTS:
+// 1. RAM-Only Gating:
+//    Zero files are created on disk or flash storage. The validation verdict
+//    lives exclusively in volatile process memory and expires upon termination.
+// 2. In-Memory CA Certificate Bundle (make_ca_memfd):
+//    Android root CA cert stores are notoriously fragmented across Android 10-15.
+//    To guarantee TLS handshakes never fail due to missing system certs,
+//    the ISRG Root X1 bundle is loaded into an anonymous Linux memfd
+//    (sys/memfd_create) and passed to libcurl via /proc/self/fd/<ca_fd>.
+// 3. HWID Resolution:
+//    Retrieves Android Secure ID (settings get secure android_id) with
+//    ro.serialno / ro.build.id fallbacks.
+// 4. Timezone-Aware Expiry Parsing:
+//    Parses ISO timestamps in server timezone (UTC+6) and normalizes to UTC.
+// ============================================================================
+
 #include "license.hpp"
 #include <cstdio>
+
 #include <cstdlib>
 #include <cstring>
 #include <cctype>

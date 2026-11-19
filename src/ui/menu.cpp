@@ -1,5 +1,23 @@
+// ============================================================================
+// NATIVE IMGUI OVERLAY MENU & TOUCH CONTROLLER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Implements the user-facing menu interface and touch handling:
+// - Floating Logo ("CM"): Draggable, circular HUD button that toggles menu visibility.
+// - Emerald Green Theme: Clean, modern palette with rounded cards and custom sliders.
+// - Axis-Locked Touch Scrolling: Custom touch gesture discriminator preventing accidental
+//   slider adjustments while scrolling through options.
+// - Subsystems Orchestration:
+//     * Calls func::esp::draw() to render the full ESP suite on the ImGui draw list.
+//     * Calls aimbot::render_fov() to draw targeting rings.
+//     * Handles safe exit with full reverse system restoration.
+// ============================================================================
+
 #include "menu.hpp"
 #include "imgui.h"
+
 #include "Android_draw/draw.h"
 #include "Android_touch/TouchHelperA.h"
 #include "other/settings_guard.hpp"

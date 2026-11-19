@@ -1,6 +1,24 @@
+// ============================================================================
+// LINUX DIGITIZER EVENT PUMP & VIRTUAL UINPUT DEVICE DRIVER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// 1. Digitizer Detection:
+//    Scans /dev/input/event0 .. event32 to find active multi-touch touchscreen devices
+//    matching ABS_MT_POSITION_X / ABS_MT_POSITION_Y and INPUT_PROP_DIRECT.
+// 2. Dual Touch Routing:
+//    - In-UI Touches: Delivers touch coordinates to Dear ImGui io.MouseDown and MousePos.
+//    - In-Game Touches: Forwarded directly through the virtual uinput node so player
+//      controls (movement joystick, fire button, jump) function with zero interruption.
+// 3. Symmetrical Cleanup:
+//    Touch_Close() releases digitizer grabs and closes all virtual device file descriptors.
+// ============================================================================
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>

@@ -1,9 +1,22 @@
 #pragma once
+// ============================================================================
+// 2D BOUNDING BOX RENDERER (CORNER BRACKETS & CHATURBHUJ)
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Renders bounding boxes around detected enemy players:
+// - Type 0: Corner Brackets (8-segment tactical brackets with shadow backing)
+// - Type 1: Full Chaturbhuj (Rectangular solid border with translucent background)
+// - Type 2: Dual Alpha Outline Box (Outer blur border + inner primary line)
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
 
     inline void drawBox(ImDrawList* dl, ImVec2 tl, ImVec2 br, ImU32 col, int type) {
+
         float thick = cfg::esp::box_thickness;
         float round = cfg::esp::box_rounding;
 

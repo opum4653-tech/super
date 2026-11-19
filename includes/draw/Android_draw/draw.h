@@ -1,6 +1,24 @@
 #ifndef NATIVESURFACE_DRAW_H
 #define NATIVESURFACE_DRAW_H
+
+// ============================================================================
+// ANDROID NATIVE SURFACE & EGL GRAPHICS PIPELINE INTERFACE
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Controls out-of-process NativeSurface window creation and OpenGL ES / EGL lifecycle:
+// - ANativeWindowCreator: Bypasses Android Java View hierarchy by creating an out-of-process
+//   SurfaceControl layer via SurfaceComposerClient.
+// - EGL Context: Binds EGLDisplay, EGLSurface, and EGLContext configured for GLES 3.0 / 2.0.
+// - Frame Lifecycle:
+//     * drawBegin(): Prepares frame, checks orientation, starts ImGui frame.
+//     * drawEnd(): Renders ImGui draw data and calls eglSwapBuffers().
+//     * shutdown(): Tears down EGL context, destroys Surface, releases ANativeWindow.
+// ============================================================================
+
 // System libs
+
 #include <iostream>
 #include <thread>
 #include <chrono>

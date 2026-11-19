@@ -1,7 +1,18 @@
 #pragma once
+// ============================================================================
+// SCREEN CROSSHAIR & CENTRAL RETICLE DOT RENDERER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Draws a 4-axis tactical crosshair and high-visibility reticle dot at screen center
+// (g_sw * 0.5f, g_sh * 0.5f) to assist with manual no-scope hip-fire alignment.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     // CROSSHAIR & CENTRAL RETICLE DOT
     inline void drawCrosshair(ImDrawList* dl) {

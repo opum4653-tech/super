@@ -1,28 +1,47 @@
 #pragma once
-#include "../other/vector3.h"   // <- TAMBAH INI
+// ============================================================================
+// ENTITY DATA STRUCTURES & MEMORY SNAPSHOT DEFINITIONS
+// ============================================================================
+// Project: crack_master
+//
+// ARCHITECTURAL PURPOSE:
+// Holds clean, decoupled, frame-synchronous snapshots of in-game players and loot.
+// Populated external to game memory by src/game/data.cpp.
+// Read concurrently by ESP rendering (src/func/esp/) and aim assistance (src/func/aim/).
+//
+// ZERO-LOCK CONTENTION ARCHITECTURE:
+// Read threads lock the mutex only for a brief vector copy (swap), preventing
+// rendering stalls or lock starvation during high-frequency memory reads.
+// ============================================================================
+
+#include "../other/vector3.h"
 #include <cstdint>
 
+// ----------------------------------------------------------------------------
+// PLAYER ENTITY SNAPSHOT
+// ----------------------------------------------------------------------------
+// Maps directly to Il2Cpp class: Player (Assembly-CSharp.dll)
 struct PlayerData {
-    uint64_t addr;
+    uint64_t addr;          // Heap pointer to in-game Player object
 
-// Box
-    Vector3  Head;
-    Vector3  Toe;
-    Vector3  headWorld;
+    // 2D Screen Space Coordinates (Projected from 3D via WorldToScreenPoint)
+    Vector3  Head;          // Projected Head position (x, y = screen pixels, z = W2S depth factor)
+    Vector3  Toe;           // Projected LeftToe position (used for bottom-of-box calculation)
+    Vector3  headWorld;     // Unprojected 3D World Space coordinates (used for 3D Silent Aim trajectory)
 
-// Meta
-    bool     isVisible;
-    bool     isBot;
-    bool     isKnocked;
-    float    distance;
-    int      curHP;
-    int      maxHP;
-    int      curArmor;
-    bool     isFiring;
-    bool     isGrounded;
-    float    speed;
-    char     name[36];
-    int      weaponType;
+    // Entity State & Gameplay Meta
+    bool     isVisible;     // True if player mesh is visible to local camera (Avatar::Uma_Visible)
+    bool     isBot;         // True if player is AI bot (Player::IsBot, 0x4A0)
+    bool     isKnocked;     // True if player is knocked down (PhyXData + 0x20 + 0x10 == 8)
+    float    distance;      // Distance in meters from local player to this enemy
+    int      curHP;         // Live Health Points (PRIDataPool -> Datas[0] -> Value)
+    int      maxHP;         // Maximum Health Points (PRIDataPool -> Datas[1] -> Value)
+    int      curArmor;      // Armor Points (PRIDataPool -> Datas[4] -> Value)
+    bool     isFiring;      // True if enemy is currently shooting (Player::IsFiring, 0x850/0x848)
+    bool     isGrounded;    // True if entity is touching the terrain (Player::IsGrounded, 0x11C)
+    float    speed;         // Current velocity scalar in m/s (sqrt(vx^2 + vy^2 + vz^2))
+    char     name[36];      // UTF-8 sanitized player display name (Player::Name, 0x490)
+    int      weaponType;    // Active weapon category ID (WeaponOnHand -> WeaponData)
 
     PlayerData()
         : addr(0),
@@ -34,13 +53,17 @@ struct PlayerData {
     { name[0] = 0; }
 };
 
+// ----------------------------------------------------------------------------
+// LOOT / WORLD ITEM SNAPSHOT
+// ----------------------------------------------------------------------------
+// Maps to Il2Cpp DropItem / MetaObject entries in MetaManager (BaseGame_Match + 0xB8)
 struct LootItem {
-    uint64_t addr;
-    uint32_t guid;
-    uint32_t resID;
-    Vector3  worldPos;
-    Vector3  screenPos;
-    float    distance;
+    uint64_t addr;          // Heap pointer to in-game loot item entity
+    uint32_t guid;          // Unique entity identifier
+    uint32_t resID;         // Resource category ID (determines weapon, ammo, armor, medkit)
+    Vector3  worldPos;      // 3D World position of the dropped item
+    Vector3  screenPos;     // 2D Screen position projected via WorldToScreenPoint
+    float    distance;      // Distance in meters from local player
 
     LootItem()
         : addr(0), guid(0), resID(0),

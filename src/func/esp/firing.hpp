@@ -1,7 +1,18 @@
 #pragma once
+// ============================================================================
+// DYNAMIC FIRING WARNING INDICATOR RENDERER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Evaluates player.isFiring state. When an enemy is actively shooting their weapon,
+// renders an animated pulsating amber warning halo above the enemy's head tag.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     // FIRING INDICATOR (PULSE WARNING WHEN ENEMY IS SHOOTING)
     inline void drawFiring(ImDrawList* dl, const PlayerData& p, float cx, float ty) {

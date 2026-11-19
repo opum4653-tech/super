@@ -1,11 +1,31 @@
 #pragma once
+// ============================================================================
+// CENTRALIZED GAME MEMORY OFFSETS & CLASS LAYOUT DICTIONARY
+// ============================================================================
+// Project: crack_master
+// Target Game: Free Fire / Free Fire Max (OB55 / Build 1.132.1)
+// Target Architecture: ARM64-v8a (64-bit pointers)
+//
+// ARCHITECTURAL MANDATE:
+// This file is the single source of truth for all memory offsets in the game.
+// When Free Fire updates (e.g. OB56, OB57), ONLY UPDATE THE NUMBERS IN THIS FILE.
+//
+// MEMORY LAYOUTS & CHAIN TOPOLOGY:
+// 1. Base Chain:
+//    libil2cpp.so + Base::GameFacade (0xA72E4E0) -> StaticFields (0xB8) -> BaseGame (0x8)
+//    BaseGame + BaseGame_Match (0x90) -> MatchInstance
+// 2. Player Dictionary:
+//    BaseGame + Match_PlayerDict (0xC0) -> MonoDictionary<Byte, Player>
+// 3. Camera Projection Matrix:
+//    Player + Camera (0x690) -> FollowCamera + 0x28 -> Camera + 0x10 -> Matrix (0x100)
+// 4. Hit Registration Raycast:
+//    Player + LockedAimingCollider (0x80) & LockedAimingCollider_Alt (0x78)
+// ============================================================================
 
 #include <cstdint>
 
-// CENTRALIZED OFFSETS MODULE — LONG-TERM MAINTAINABILITY FOUNDATION
-// When Free Fire updates (e.g. OB56, OB57), ONLY UPDATE THIS FILE!
-
 namespace Offsets {
+
 
 // Target game build these positions were read from: OB55 / 1.132.1.
 // Keep this comment in sync with the file whenever a value is refreshed —

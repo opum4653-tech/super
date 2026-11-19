@@ -1,17 +1,41 @@
 #pragma once
+// ============================================================================
+// TARGET ACQUISITION, SELECTION & HYSTERESIS ENGINE
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Evaluates all detected enemy entities against FOV limits, occlusion filters,
+// user priority modes (Crosshair, Low HP, 3D Distance), and active trigger states.
+//
+// KEY ALGORITHMS:
+// 1. Scoping Detection:
+//    Reads FollowCamera (0x690) -> FOVOffset (0x84). Negative values indicate zoom.
+// 2. Target Stickiness / Hysteresis:
+//    Maintains active target lock across burst intervals within 1.35x FOV radius,
+//    eliminating reticle hopping and erratic direction changes.
+// 3. Knocked Player Penalty:
+//    Penalizes downed/knocked enemies (+5000 score) so active standing threats
+//    are always locked and neutralized first.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace aimbot {
 
+    // Output structure returned by acquire_target()
     struct TargetAcquisitionResult {
-        PlayerData target;
-        Vector3 bestScreenPos = Vector3::Zero();
-        bool isScoping = false;
-        bool isFiring = false;
-        bool triggerActive = false;
-        bool valid = false;
+        PlayerData target;                      // Selected enemy entity snapshot
+        Vector3 bestScreenPos = Vector3::Zero();// 2D screen coordinate of lock point
+        bool isScoping = false;                 // True if local player is aiming down sights
+        bool isFiring = false;                  // True if local player is shooting weapon
+        bool triggerActive = false;             // True if aim assist should be actively engaged
+        bool valid = false;                     // True if a qualified target was successfully acquired
     };
 
+    // ------------------------------------------------------------------------
+    // TARGET ACQUISITION & SCORING PIPELINE
+    // ------------------------------------------------------------------------
     inline TargetAcquisitionResult acquire_target(uint64_t localPlayer) {
         TargetAcquisitionResult result;
         if (!is_valid_ptr(localPlayer)) return result;

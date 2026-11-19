@@ -1,18 +1,26 @@
 #pragma once
-
-// The overlay relaxes block_untrusted_touches at startup so the injected touch
-// stream is accepted. That write is a persistent forensic artifact unless the
-// original value is put back.
+// ============================================================================
+// ANDROID SETTINGS STATE GUARD & SYMMETRICAL REVERSE RESTORER
+// ============================================================================
+// Project: crack_master
 //
-// capture_and_relax() records the pre-existing value of each namespace (or that
-// the key was absent) and then relaxes the flag. restore() reverses it exactly:
-// a key that was not present before is deleted rather than overwritten, so the
-// settings database ends byte-identical to how it was found.
+// PROBLEM & SYSTEM ROLE:
+// On Android 12+, the OS blocks touch events passing through non-system overlay windows
+// via the setting: block_untrusted_touches.
+// To enable interactive touch passthrough on the floating menu, the overlay relaxes
+// this setting to '0'.
 //
-// Both sides cost one fork each, run once per session. restore() is safe to call
-// from any teardown path, repeatedly, and from the signal handler.
+// FORENSIC INTEGRITY MANDATE:
+// Simply leaving the setting modified leaves an obvious forensic footprint.
+// settings_guard captures the initial state:
+// - If the setting was absent ("null"): deletes the key upon exit via 'settings delete'.
+// - If the setting was '1': restores it back to '1' via 'settings put'.
+// Result: Leaves the device settings database byte-identical to how it was found.
+// Safe to invoke repeatedly and re-entrantly from signal handlers (SIGINT, SIGTERM, SIGHUP).
+// ============================================================================
 
 #include <atomic>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

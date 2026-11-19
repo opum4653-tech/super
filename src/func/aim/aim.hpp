@@ -1,4 +1,22 @@
 #pragma once
+// ============================================================================
+// AIMBOT ASSIST & TRAJECTORY STEERING WORKER THREAD
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Coordinates the full trajectory steering and motion modifier cycle:
+// - Thread Management: Started & stopped by attach_worker in src/main.cpp.
+// - Dynamic Thread Cadence:
+//     * 2ms sleep when actively shooting (for ultra-crisp bullet alignment).
+//     * 10ms sleep when idling (reduces CPU cycles).
+// - Sub-Module Orchestration:
+//     * motion::update()      -> Motion enhancements (air flight & phantom)
+//     * acquire_target()      -> Target scoring, FOV filtering, and hysteresis
+//     * evaluate_headshot()   -> RNG headshot roll & raycast collider redirection
+//     * apply_trajectory()    -> 3D unit trajectory steering into AimingInfo
+// ============================================================================
+
 #include "common.hpp"
 #include "target.hpp"
 #include "headshot.hpp"
@@ -6,18 +24,8 @@
 #include "fov.hpp"
 #include "motion.hpp"
 
-// TRAJECTORY ASSIST & MOTION ENHANCEMENT ENGINE (NATURAL GAMEPLAY — ZERO CAMERA JUMPING)
-// Features:
-// 1. Natural Gameplay: Camera rotation is 100% untouched. Finger aiming is free.
-// 2. Strict Target Stickiness & Hysteresis: ZERO screen shaking when multiple enemies enter FOV.
-// 3. Grace-Period Burst Lock: Prevents lock resets between rapid bullet intervals.
-// 4. Trajectory Write: only the client bullet direction is steered. Recoil is
-//    never read, never scaled, never written — the game's own recoil runs as shipped.
-// 5. Strict FOV Circle: Strictly respects FOV limit; never locks outside.
-// 6. Wall Filter: a target behind cover is never acquired and never held.
-// 7. Motion Modifiers: Air Flight, Sprint Boost, and Phantom Mode.
-
 namespace aimbot {
+
 
     inline std::atomic<bool>& aim_thread_running() {
         static std::atomic<bool> s_run{false};

@@ -1,5 +1,21 @@
 #pragma once
+// ============================================================================
+// AIMBOT COMMON MATHEMATICAL TYPES & LOCK STATE PRIMITIVES
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Shared foundation header for all sub-modules of the aim suite:
+// - target.hpp   (Acquisition & scoring)
+// - headshot.hpp (Collider override & percentage roll)
+// - silent.hpp   (3D trajectory unit vector calculation)
+// - fov.hpp      (Screen FOV circle & target ring rendering)
+// - motion.hpp   (Air flight & phantom mode modifiers)
+// ============================================================================
+
+#ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
+#endif
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "../../game/player.hpp"
@@ -22,6 +38,10 @@ extern float g_sh;
 
 namespace aimbot {
 
+    // ------------------------------------------------------------------------
+    // TARGET LOCK VISUAL STATE
+    // ------------------------------------------------------------------------
+    // Read by fov.hpp to draw targeting lock reticle ring on active enemy
     struct TargetInfo {
         bool valid = false;
         Vector3 screenPos = Vector3::Zero();
@@ -29,17 +49,26 @@ namespace aimbot {
 
     inline TargetInfo g_currentTarget;
 
-    // Safe 3D vector normalization with division-by-zero & NaN protection
+    // ------------------------------------------------------------------------
+    // SAFE 3D UNIT VECTOR NORMALIZATION
+    // ------------------------------------------------------------------------
+    // Protects against zero-length vectors, division-by-zero, and IEEE-754 NaN/Inf.
+    // Unity's Quaternion::LookRotation crashes or corrupts if fed an unnormalized or NaN vector.
     inline Vector3 SafeNormalize(const Vector3& v) {
         float lenSq = v.x * v.x + v.y * v.y + v.z * v.z;
         if (lenSq < 1e-6f || !std::isfinite(lenSq)) {
-            return Vector3(0.0f, 0.0f, 1.0f); // Default forward vector
+            return Vector3(0.0f, 0.0f, 1.0f); // Fallback: forward unit vector
         }
         float invLen = 1.0f / sqrtf(lenSq);
         return Vector3(v.x * invLen, v.y * invLen, v.z * invLen);
     }
 
-    // Target stickiness with hysteresis & grace period to completely eliminate screen shaking
+    // ------------------------------------------------------------------------
+    // TARGET HYSTERESIS & STICKINESS STATE
+    // ------------------------------------------------------------------------
+    // Prevents target jumping and screen shaking when 2+ enemies are in the FOV circle.
+    // Once locked to an enemy address, the lock is retained until the target dies,
+    // leaves the extended FOV radius, or the grace period expires.
     inline uint64_t s_lockedTargetAddr = 0;
     inline int      s_lockTimeoutTicks = 0;
 
@@ -47,3 +76,4 @@ namespace aimbot {
     inline Vector3 s_smoothDir = Vector3::Zero();
 
 } // namespace aimbot
+

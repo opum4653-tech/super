@@ -1,7 +1,18 @@
 #pragma once
+// ============================================================================
+// WEAPON CATEGORY BADGE RENDERER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Draws a rounded pill badge positioned below the player's feet indicating
+// their active handheld weapon type (AR, SNIPER, SMG, SHOTGUN, PISTOL, etc.).
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     // WEAPON PILL (RENDERED BELOW PLAYER FEET)
     inline void drawWeapon(ImDrawList* dl, const PlayerData& p, ImVec2 foot) {

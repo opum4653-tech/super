@@ -1,4 +1,22 @@
-// ZqwClient — ninmods PROJECT
+// ============================================================================
+// SYSTEM CORE ENTRY POINT & RUNTIME LIFECYCLE SUPERVISOR
+// ============================================================================
+// Project: crack_master (External Out-of-Process Native Overlay & Assist Suite)
+// Reference Architecture: Pure External (Zero Code Patch, Zero In-Game Injection)
+//
+// FILE RELATIONSHIPS & DATA FLOW:
+// - Android_draw/draw.h       -> NativeSurface ANativeWindow creation & EGL context setup
+// - ui/menu.hpp               -> ImGui emerald-green native touch UI menu rendering
+// - protect/license.hpp       -> RAM-only HTTPS key validation & memfd CA security handshake
+// - other/memory.hpp          -> Ring-3 external direct syscall RPM/WPM engine (sys::vm_read/write)
+// - other/display_manager.hpp -> Zero-fork sysfs/property display metrics cache
+// - other/settings_guard.hpp  -> Android block_untrusted_touches state capture & reverse restore
+// - game/data.hpp             -> Entity dictionary scraper thread & world-to-screen matrix sync
+// - game/Offsets.h            -> Centralized memory offset dictionary (OB55 / 1.132.1)
+// - func/esp.hpp              -> Visual ESP render pipeline (Boxes, Tracers, Info, Health bars)
+// - func/aim/aim.hpp          -> Trajectory steering assist & motion enhancement thread
+// ============================================================================
+
 #include "Android_draw/draw.h"
 #include "ui/menu.hpp"
 #include "protect/license.hpp"
@@ -20,9 +38,21 @@
 #include <string>
 #include <atomic>
 
+// Global animation timer incremented each frame for UI pulse & glow effects
 extern float global_anim_time;
+
+// Global atomic flag controlling main render loop and background worker lifecycles
 std::atomic<bool> main_thread_flag{true};
 
+// ----------------------------------------------------------------------------
+// LICENSE VERIFICATION GATE
+// ----------------------------------------------------------------------------
+// Operational Behavior:
+// 1. Checks command line arguments (TTY / terminal mode).
+// 2. Checks NIN_LICENSE_KEY environment variable (passed by Android UI launcher).
+// 3. Fallbacks to interactive stdin prompt (IPC stream from launcher app).
+// 4. Performs HTTPS online verification against license backend via protect/license.cpp.
+// 5. Waits for 'START' trigger from launcher app before proceeding to overlay init.
 static bool check_license_gate(int argc, char** argv) {
     lic::init();
 
@@ -103,7 +133,17 @@ static bool check_license_gate(int argc, char** argv) {
     return true;
 }
 
-// START OVERLAY
+// ----------------------------------------------------------------------------
+// OVERLAY & WORKER INITIALIZATION PIPELINE
+// ----------------------------------------------------------------------------
+// Architectural Steps:
+// 1. Query display metrics via display_manager (cached in RAM).
+// 2. Capture and relax Android block_untrusted_touches via settings_guard.
+// 3. Create out-of-process ANativeWindow SurfaceView and bind EGL/OpenGL ES context.
+// 4. Initialize Touch subsystem (uinput virtual touch device).
+// 5. Spawn background attach_worker thread to monitor game PID and libil2cpp.so base.
+// 6. Execute 60 FPS microsecond-paced render loop (drawBegin -> menu::render -> drawEnd).
+// 7. Execute symmetrical reverse cleanup upon exit.
 static int start_overlay() {
     // screen_config() pulls orientation from the binder; push it into the display
     // cache instead of spawning a shell to ask SurfaceFlinger the same thing.
@@ -120,33 +160,35 @@ static int start_overlay() {
     native_window_screen_x = max_size;
     native_window_screen_y = min_size;
 
+    // Symmetrical touch relaxation: captures original setting to restore later
     settings_guard::capture_and_relax();
 
+    // Create external NativeSurface window and initialize OpenGL ES / ImGui context
     if (!initGUI_draw(native_window_screen_x, native_window_screen_y, true, false)) {
         settings_guard::restore();      // captured before init — put it back on this path too
         return -1;
     }
 
+    // Initialize virtual digitizer / uinput event injection for touch pass-through
     Touch_Init(displayInfo.width, displayInfo.height, displayInfo.orientation, false);
 
-// START BACKGROUND ATTACH THREAD
-    // Allows overlay GUI & floating logo to appear immediately upon launching,
-    // without blocking for game launch.
+    // BACKGROUND ATTACH THREAD:
+    // Enables overlay GUI & floating logo to appear immediately upon launching,
+    // without blocking for target game launch. Once game starts, starts data & aim threads.
     std::thread attach_worker([]() {
         while (main_thread_flag) {
             proc::pid = get_pid();
             if (proc::pid > 0) {
                 proc::lib = get_lib();
                 if (proc::lib > 0) {
-                    // Verify memory
+                    // Verify valid ELF magic header in target process (0x7F 'E' 'L' 'F')
                     uint32_t elfMagic = rpm<uint32_t>(proc::lib);
                     if (elfMagic == 0x464C457F) {
                         data::thread_start();
                         aimbot::thread_start();
 
                         // Monitor target lifecycle during active gameplay.
-                        // Orientation is tracked by the render loop, which already
-                        // sees every transition; nothing to poll for here.
+                        // When game exits or restarts, stop reader threads cleanly.
                         while (main_thread_flag) {
                             if (get_pid() <= 0) {
                                 aimbot::thread_stop();
@@ -164,13 +206,15 @@ static int start_overlay() {
     attach_worker.detach();
 
     // MAIN RENDER LOOP (PRECISE 60 FPS THERMAL PACING)
-    constexpr int64_t target_frame_us = 16666; // 60 FPS
+    // Microsecond timing prevents CPU spinning and battery drain while guaranteeing smooth 60fps
+    constexpr int64_t target_frame_us = 16666; // 16.666 ms per frame (60 FPS)
     while (main_thread_flag) {
         auto frame_start = std::chrono::steady_clock::now();
         global_anim_time += 0.016f;
-        drawBegin();
-        ui::menu::render();
-        drawEnd();
+
+        drawBegin();            // Prepares new ImGui frame & polls orientation
+        ui::menu::render();     // Renders ImGui menu, floating logo, and calls func::esp::draw()
+        drawEnd();              // Swaps EGL buffers onto native display
 
         auto frame_end = std::chrono::steady_clock::now();
         int64_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start).count();
@@ -181,6 +225,7 @@ static int start_overlay() {
         }
     }
 
+    // SYMMETRICAL REVERSE CLEANUP ON NORMAL EXIT
     shutdown();
     Touch_Close();
     aimbot::thread_stop();
@@ -189,8 +234,14 @@ static int start_overlay() {
     return 0;
 }
 
-// EMERGENCY CLEANUP (RESTORING SYSTEM INTEGRITY ON EXTERNAL KILL / SIGNAL)
+// ----------------------------------------------------------------------------
+// EMERGENCY CLEANUP TRAP (SIGNAL SAFETY & REVERSE STATE INTEGRITY)
+// ----------------------------------------------------------------------------
+// Triggered on SIGINT, SIGTERM, SIGHUP. Guarantees that system settings
+// (block_untrusted_touches) and virtual uinput nodes are ALWAYS restored,
+// leaving zero lingering footprint on Android OS even if killed externally.
 static void emergency_cleanup(int sig) {
+    (void)sig;
     main_thread_flag = false;
     settings_guard::restore();
     Touch_Close();
@@ -199,7 +250,10 @@ static void emergency_cleanup(int sig) {
     _exit(0);
 }
 
-// MAIN
+// ----------------------------------------------------------------------------
+// STEALTH PROCESS OBFUSCATION
+// ----------------------------------------------------------------------------
+// Modifies /proc/self/comm via prctl(PR_SET_NAME) and masks argv[0] in place.
 static void mask_process_name(int argc, char** argv, const char* fake_name) {
     if (!argv || !argv[0] || !fake_name) return;
 
@@ -214,26 +268,32 @@ static void mask_process_name(int argc, char** argv, const char* fake_name) {
     }
 }
 
+// ----------------------------------------------------------------------------
+// APPLICATION ENTRY POINT
+// ----------------------------------------------------------------------------
 int main(int argc, char** argv) {
+    // Unbuffer standard streams for responsive IPC pipe communication
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
-    // Register cleanup traps to guarantee settings & touch nodes are always restored
+    // 1. Register signal traps to guarantee settings & touch nodes are always restored
     std::signal(SIGINT, emergency_cleanup);
     std::signal(SIGTERM, emergency_cleanup);
     std::signal(SIGHUP, emergency_cleanup);
-    std::signal(SIGPIPE, SIG_IGN);
+    std::signal(SIGPIPE, SIG_IGN); // Ignore SIGPIPE if parent closes stdout pipe
 
-    // Mask process name immediately upon entry to gemini-cli
+    // 2. Mask process name immediately upon entry to gemini-cli
     mask_process_name(argc, argv, "gemini-cli");
 
+    // 3. Mark process non-dumpable to block unauthorized ptrace inspection
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
 
+    // 4. Verify license gate
     if (!check_license_gate(argc, argv)) {
         return 1;
     }
 
-    // Scrub license key from argv and environment immediately to prevent /proc/self/cmdline and /proc/self/environ leakage
+    // 5. Zero-wipe sensitive credentials from argv and environment to eliminate /proc/self/cmdline and /proc/self/environ leaks
     for (int i = 1; i < argc; ++i) {
         if (argv[i]) {
             size_t l = strlen(argv[i]);
@@ -243,5 +303,6 @@ int main(int argc, char** argv) {
     unsetenv("NIN_LICENSE_KEY");
     unsetenv("NIN_DEVICE_HWID");
 
+    // 6. Launch overlay engine and enter render loop
     return start_overlay();
 }

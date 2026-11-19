@@ -1,3 +1,24 @@
+// ============================================================================
+// GAME ENTITY SCRAPING & MATRIX SYNCHRONIZATION ENGINE
+// ============================================================================
+// Project: crack_master (Pure External Ring-3 Read Engine)
+//
+// ARCHITECTURAL OVERVIEW:
+// 1. Base Chain Resolution:
+//    Traverses GameFacade (0xA72E4E0) -> StaticFields (0xB8) -> BaseGame (0x8) -> Match (0x90).
+// 2. Camera ViewMatrix Resolution (pewpew-grade multi-candidate fallbacks):
+//    - Candidate 1: LocalPlayer -> FollowCamera (0x690) -> Camera (0x28) -> IntPtr (0x10) -> Matrix (0x100)
+//    - Candidate 2: LocalPlayer -> FollowCamera (0x690) -> 0x30 -> 0x10 -> Matrix (0x100)
+//    - Candidate 3: BaseGame -> CameraManager (0xD8) -> Camera (0x20/0x28) -> 0x10 -> Matrix (0x100)
+//    Validated by is_valid_matrix() before committing to avoid W2S screen tearing.
+// 3. Syscall Minimization via PlayerSpan:
+//    Reads contiguous span (0x70 to 0x860) in ONE process_vm_readv call instead of 15 individual syscalls.
+// 4. Entity Filtering:
+//    Filters out dead players, teammates (UMAData.isTeammate), and local user.
+// 5. Data Delivery:
+//    Atomic double-buffered swap into data::players and data::loots vectors protected by mutexes.
+// ============================================================================
+
 #include "data.hpp"
 #include "Offsets.h"
 #include "../other/utils.hpp"
@@ -15,6 +36,7 @@
 
 namespace data {
 
+    // Exported thread-synchronized entity buffers
     std::vector<PlayerData>  players;
     std::mutex               players_mutex;
     std::vector<LootItem>    loots;
@@ -23,12 +45,19 @@ namespace data {
     std::atomic<bool>        inMatch{false};
     matrix                   viewMatrix{};
 
+    // Internal background thread state
     static std::atomic<bool> g_run{false};
     static std::thread       g_thread;
 
+    // Visibility debouncer: eliminates 1-frame flickering when enemies pass behind thin foliage
     static std::unordered_map<uint64_t, int>  g_visCounter;
     static std::unordered_map<uint64_t, bool> g_visStable;
 
+    // ------------------------------------------------------------------------
+    // CAMERA MATRIX INTEGRITY VALIDATION (Cross-referenced from pewpew)
+    // ------------------------------------------------------------------------
+    // Tests column norms and checks for NaN / Inf to guarantee that the camera
+    // matrix is fully initialized and in an active 3D rendering projection state.
     static inline bool is_valid_matrix(const matrix& m) {
         if (std::isnan(m.m11) || std::isnan(m.m22) || std::isnan(m.m33) || std::isnan(m.m44)) return false;
         if (std::isinf(m.m11) || std::isinf(m.m22) || std::isinf(m.m33) || std::isinf(m.m44)) return false;
@@ -38,16 +67,14 @@ namespace data {
         return (col1 > 0.05f && col2 > 0.05f && col4 > 0.05f);
     }
 
+    // ------------------------------------------------------------------------
+    // SINGLE-SYSCALL PLAYER FIELD SPAN (STEALTH OPTIMIZATION)
+    // ------------------------------------------------------------------------
     // Every field read directly off the player object sits between 0x70 and
     // 0x860 (Player::HP .. Player::IsFiring). Pulling that span in a single
     // process_vm_readv replaces roughly a dozen syscalls per player per tick
     // with one, which is the point: the read pattern stops looking like a
     // field-by-field scrape of the same object.
-    //
-    // The object is at least 0x24B0 bytes (Player::DeathInfo), so the span never
-    // runs past its allocation and every page inside it is committed. A failed
-    // read leaves ok == false and every accessor returns zero, which the callers
-    // already reject — it fails closed rather than half-reading.
     static constexpr size_t kSpanLo = 0x70;    // Offsets::Player::HP
     static constexpr size_t kSpanHi = 0x860;   // just past Offsets::Player::IsFiring (0x848)
 
@@ -69,7 +96,9 @@ namespace data {
         }
     };
 
-    // HEALTH & ARMOR — Live extraction from Il2Cpp PRIDataPool
+    // ------------------------------------------------------------------------
+    // HEALTH & ARMOR EXTRACTION (Il2Cpp PRIDataPool)
+    // ------------------------------------------------------------------------
     // pool is m_PRIDataPool (0x70) on player.
     // pool + 0x10 is m_Datas (ReplicationData[] array).
     // Array count is at +0x18. Elements start at +0x20.
@@ -107,7 +136,9 @@ namespace data {
         }
     }
 
-    // NAME
+    // ------------------------------------------------------------------------
+    // PLAYER NAME EXTRACTION (MonoString UTF-16 to ASCII / UTF-8)
+    // ------------------------------------------------------------------------
     static int readName(const PlayerSpan& span, char* buf, size_t buflen) {
         buf[0] = 0;
         auto sp = span.at<uint64_t>(Offsets::Player_Name);
@@ -127,7 +158,9 @@ namespace data {
         return n;
     }
 
-    // WEAPON TYPE
+    // ------------------------------------------------------------------------
+    // WEAPON CATEGORY EXTRACTION
+    // ------------------------------------------------------------------------
     static int readWeapon(const PlayerSpan& span) {
         auto w = span.at<uint64_t>(Offsets::Player_Weapon);
         if (!w) return -1;
@@ -136,7 +169,9 @@ namespace data {
         return rpm<int>(wd + 0x64);
     }
 
-    // BONE → SCREEN — the node pointer is already out of the span
+    // ------------------------------------------------------------------------
+    // BONE PROJECTION HELPER
+    // ------------------------------------------------------------------------
     static Vector3 boneScreen(uint64_t node) {
         if (!node) return Vector3::Zero();
         Vector3 w = GetNodePosition(node);
@@ -144,7 +179,10 @@ namespace data {
         return WorldToScreenPoint(viewMatrix, w);
     }
 
-    // SCAN LOOT
+    // ------------------------------------------------------------------------
+    // GROUND LOOT SCANNER
+    // ------------------------------------------------------------------------
+    // Traverses MetaManager.DropObjects dictionary to locate weapons, armor, ammo
     static void scanLoot(uint64_t BaseGame, const Vector3& localPos) {
         std::vector<LootItem> tmp;
 
@@ -193,14 +231,16 @@ namespace data {
         loots = std::move(tmp);
     }
 
-    // UPDATE
+    // ------------------------------------------------------------------------
+    // MAIN MEMORY SCRAPING CYCLE
+    // ------------------------------------------------------------------------
     void update() {
         if (proc::pid <= 0 || proc::lib == 0) return;
 
         std::vector<PlayerData> tmp;
         tmp.reserve(64);
 
-        // Base chain
+        // 1. Resolve Base Chain
         auto GfCell = rpm<uint64_t>(proc::lib + oxorany(Offsets::GameFacade));
         if (!GfCell) return;
         auto GfClass = rpm<uint64_t>(GfCell);
@@ -217,6 +257,7 @@ namespace data {
         bool matchActive = rpm<bool>(BaseGame + Offsets::MatchIsRunning) || (localPlayer != 0);
         inMatch.store(matchActive);
 
+        // Clear states if match is over or in lobby
         if (!matchActive) {
             localPlayerAddr.store(0);
             {
@@ -248,7 +289,7 @@ namespace data {
             return;
         }
 
-        // Simpan local player
+        // Store active local player pointer
         localPlayerAddr.store(localPlayer ? localPlayer : 0);
 
         if (!localPlayer) {
@@ -259,7 +300,7 @@ namespace data {
             return;
         }
 
-// Camera chain — Multi-candidate resolution with matrix validation (pewpew reference pattern)
+        // 2. Camera Chain — Multi-Candidate Resolution with Matrix Validation (pewpew pattern)
         uint64_t Follow = 0, Cam = 0, IntPtr = 0;
         bool matrix_resolved = false;
 
@@ -319,12 +360,12 @@ namespace data {
             return;
         }
 
-// Local position
+        // 3. Local Player 3D Position
         Vector3 localPos = Vector3::Zero();
         uint64_t headNode = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
         if (headNode) localPos = GetNodePosition(headNode);
 
-// LOOT
+        // 4. Ground Loot Scan
         if (cfg::esp::loot) {
             scanLoot(BaseGame, localPos);
         } else {
@@ -332,7 +373,7 @@ namespace data {
             loots.clear();
         }
 
-// PLAYERS
+        // 5. Enemy Players Dictionary Traversal
         uint64_t dictAddr = rpm<uint64_t>(BaseGame + Offsets::Match_PlayerDict);
         if (!dictAddr) {
             std::lock_guard<std::mutex> lk(players_mutex);
@@ -350,12 +391,12 @@ namespace data {
         int nv = dict.getNumValues();
         MonoDictionary::EntryBlock blk{};
         for (int i = 0; i < nv; i++) {
-            // Dictionary slots come out of the array 64 at a time.
+            // Dictionary slots come out of the array 64 at a time (block read optimization)
             if (i % MonoDictionary::kBlockSize == 0 && !dict.read_block(i, blk)) break;
             uint64_t enemy = blk.value[i % MonoDictionary::kBlockSize];
             if (!enemy || enemy < 0x100000000 || enemy == localPlayer) continue;
 
-            // One syscall for everything that lives on the player object itself.
+            // One syscall for everything that lives on the player object itself
             PlayerSpan span(enemy);
             if (!span.ok) continue;
 
@@ -373,7 +414,7 @@ namespace data {
 
             bool rawVisible = rpm<bool>(uma + Offsets::Uma_Visible);
 
-            // Debounce visible
+            // Debounce visibility state across frames
             bool visible;
             {
                 auto it = g_visStable.find(enemy);
@@ -396,14 +437,14 @@ namespace data {
                 }
             }
 
-            // Filter teammates & local player via UMAData flags (0x81 = isTeammate, 0x80 = isLocalPlayer)
+            // Zero-overhead filtering: drop teammates & local user
             auto umaData = rpm<uint64_t>(uma + Offsets::Uma_Data);
             if (umaData) {
                 if (rpm<bool>(umaData + Offsets::Avatar::UmaData_Teammate)) continue;
                 if (rpm<bool>(umaData + Offsets::Avatar::UmaData_LocalPlayer)) continue;
             }
 
-            // Head world
+            // Head 3D World Position
             uint64_t hNode = span.at<uint64_t>(Offsets::Bone_Head);
             if (!hNode) continue;
             Vector3 headWorld = GetNodePosition(hNode);
@@ -414,13 +455,14 @@ namespace data {
             float dist = calculate_distance(localPos, headWorld);
             if (dist < 0.8f || dist > cfg::esp::max_range) continue;
 
+            // 2D Screen Projections
             Vector3 headScreen = WorldToScreenPoint(viewMatrix, headWorld);
             if (headScreen.z < 0.001f) continue;
 
             Vector3 toeScreen = boneScreen(span.at<uint64_t>(Offsets::Bone_LeftToe));
             if (toeScreen.z < 0.001f) continue;
 
-            // Knocked state check (phyxData 0x1D60 -> maybeDead 0x20 -> isKnocked 0x10 == 8)
+            // Knocked / Downed state detection (PhyXData 0x1D60 -> MaybeDead 0x20 -> IsKnocked 0x10 == 8)
             bool isKnocked = false;
             uint64_t phyx = rpm<uint64_t>(enemy + Offsets::Player::PhyXData);
             if (phyx) {
@@ -430,7 +472,7 @@ namespace data {
                 }
             }
 
-            // Build
+            // Build synchronized PlayerData entity snapshot
             PlayerData pd;
             readName(span, pd.name, sizeof(pd.name));
             pd.weaponType = readWeapon(span);
@@ -456,18 +498,22 @@ namespace data {
             tmp.push_back(pd);
         }
 
+        // Clean up debounce cache if map exceeds 200 stale entries
         if (g_visStable.size() > 200) {
             g_visStable.clear();
             g_visCounter.clear();
         }
 
+        // Atomic double-buffer swap into shared state container
         {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.swap(tmp);
         }
     }
 
-    // THREAD
+    // ------------------------------------------------------------------------
+    // BACKGROUND READER THREAD CADENCE
+    // ------------------------------------------------------------------------
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             update();
@@ -475,7 +521,7 @@ namespace data {
             if (iv < 8) iv = 8;
             if (iv > 100) iv = 100;
 
-            // If not in match, throttle politely to 100ms (10 checks/sec)
+            // In lobby or between matches: throttle politely to 100ms (10 checks/sec)
             if (!inMatch.load(std::memory_order_relaxed)) {
                 iv = 100;
             }
@@ -495,4 +541,5 @@ namespace data {
         std::lock_guard<std::mutex> lk(players_mutex);
         players.clear();
     }
-}
+
+} // namespace data

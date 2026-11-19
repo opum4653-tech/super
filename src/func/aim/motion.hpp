@@ -1,7 +1,26 @@
 #pragma once
+// ============================================================================
+// MOTION ENHANCEMENTS & ELEVATION MODIFIER ENGINE
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Controls advanced motion mechanics:
+// 1. Air Flight Elevation:
+//    Extracts the root Hip Transform Matrix position in memory:
+//      Player -> HipTF (0x6A8) -> Node (0x10) -> Obj (0x10) -> MatrixPtr (0x38) -> Position (0x90)
+//    Offsets world Y coordinate upwards by cfg::motion::flight_height meters
+//    and sets Player::FlightFlag (0x2098).
+// 2. Phantom Mode:
+//    Toggles entity phantom rendering state flag at Player::PhantomState (0x814).
+// 3. Reverse Reset Path:
+//    reset() symmetrically restores original states and unsets flags upon disable.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace aimbot::motion {
+
 
     inline float s_flightGroundY = 0.0f;
     inline bool  s_flightActive = false;

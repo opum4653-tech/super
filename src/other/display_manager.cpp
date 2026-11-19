@@ -1,5 +1,16 @@
+// ============================================================================
+// ZERO-FORK SAFE DISPLAY RESOLUTION IMPLEMENTATION
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Multi-tier implementation to resolve screen resolution without executing shell
+// forks during normal runtime.
+// ============================================================================
+
 #include "display_manager.hpp"
 #include <cstdio>
+
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>

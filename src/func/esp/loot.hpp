@@ -1,7 +1,24 @@
 #pragma once
+// ============================================================================
+// GROUND LOOT & WORLD ITEM ESP RENDERER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Decodes loot categories from item resource ID (resID high byte):
+// - 0x01: Weapons (GUN) -> Soft Coral Red
+// - 0x02: Ammunition (AMMO) -> Warm Amber Yellow
+// - 0x03: Vests/Helmets (ARMOR) -> Cyan Blue
+// - 0x04: Medkits/Inhalers (HEAL) -> Emerald Green
+// - 0x05: Grenades/Gloo Walls (NADE) -> Violet Purple
+// - 0x06: Backpacks (BAG) -> Leather Brown
+// Renders 2D world tags with distance indicators.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     inline const char* lootCat(uint32_t resID) {
         uint32_t c = (resID >> 24) & 0xFF;

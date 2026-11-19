@@ -1,4 +1,19 @@
 #pragma once
+// ============================================================================
+// MAIN VISUAL ESP RENDER PIPELINE ORCHESTRATOR
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// High-performance, zero-flicker visual rendering pipeline:
+// - Executed every frame by ui::menu::render() on the main render thread.
+// - Thread-safe snapshot copy: briefly locks data::players_mutex to copy entities,
+//   ensuring the reader thread is never blocked during ImGui drawing.
+// - Spatial Culling: Discards entities behind the camera plane or outside screen bounds.
+// - Knocked Entity Visualization: Highlights knocked players in soft red.
+// - Component Sequencing: Tracers -> Boxes -> Firing Halos -> Info -> Health -> Weapon -> Loot -> Crosshair.
+// ============================================================================
+
 #include "common.hpp"
 #include "box.hpp"
 #include "line.hpp"
@@ -10,6 +25,7 @@
 #include "firing.hpp"
 
 namespace func::esp {
+
 
     // MAIN ESP DRAW PIPELINE
     inline void draw() {

@@ -1,10 +1,30 @@
 #pragma once
+// ============================================================================
+// HIT REGISTRATION & HEADSHOT PROBABILITY EVALUATOR
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Controls server-acknowledged hit registration and headshot rates:
+// 1. Headshot Percentage Roll:
+//    Evaluates user-configured headshot_rate (0% to 100%) via high-speed,
+//    non-blocking Xorshift RNG seeded with process PID and time.
+// 2. Raycast Collider Redirection:
+//    Extracts HeadCollider (0x740 / 0x738 fallback) from target player entity
+//    and writes it to:
+//      - LockedAimingCollider (0x80 on AttackableEntity)
+//      - LockedAimingCollider_Alt (0x78 on AttackableEntity)
+//    This guarantees that the game's internal client-side raycast registers
+//    the bullet impact on the enemy's head hitbox.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace aimbot {
 
     // Evaluates headshot rate roll (0% - 100%) and configures head collider overrides
     inline bool evaluate_headshot(const PlayerData& target, bool isScoping) {
+
         float rate = cfg::aim::headshot_rate;
         bool isSniperShot = (cfg::aim::sniper_aim && isScoping);
         bool lockToHead = false;

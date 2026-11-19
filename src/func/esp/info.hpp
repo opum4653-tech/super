@@ -1,7 +1,21 @@
 #pragma once
+// ============================================================================
+// PLAYER INFO OVERLAY RENDERER (NAME, DISTANCE & BOT TAG)
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Renders identification metadata centered above the enemy player's bounding box:
+// - Name: Truncated to 12 chars to avoid screen clutter.
+// - Distance: Formatted dynamically as meters (e.g. "45m") or kilometers ("1.2km").
+// - Bot Tag: Renders a distinct red [AI] indicator for computer-controlled entities.
+// - Legibility: Multi-pass black shadow outlines ensure crisp readability against bright terrain.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     // TOP INFO: PLAYER NAME, DISTANCE, AND BOT TAG (NO OVERLAP WITH TRACER)
     inline void drawTopInfo(ImDrawList* dl, const PlayerData& p, float cx, float top_y) {

@@ -1,4 +1,18 @@
 #pragma once
+// ============================================================================
+// VISUAL ESP COMMON PRIMITIVES & GEOMETRIC MATH
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Common visual foundation for all ESP render elements:
+// - Bounding Box Calculation: computePlayerBox() derives top-left and bottom-right
+//   coordinates from projected 2D Head and Toe coordinates.
+// - Dynamic Color Gradients: hpColor() calculates green-to-red gradient based on HP ratio.
+// - Distance Fading: fadeDist() attenuates brightness based on distance to local player.
+// - String Truncation & Formatting: Safely truncates player names and formats meters/km.
+// ============================================================================
+
 #ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
 #endif
@@ -15,6 +29,7 @@
 extern float g_sw, g_sh;
 
 namespace func::esp {
+
 
     inline bool is_active() {
         if (!cfg::master_enabled) return false;

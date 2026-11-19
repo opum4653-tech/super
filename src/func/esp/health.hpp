@@ -1,7 +1,20 @@
 #pragma once
+// ============================================================================
+// VERTICAL HEALTH & ARMOR BAR RENDERER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Draws vertical status bars anchored to the right side of the 2D bounding box:
+// - Health Bar: Dynamic height based on curHP / maxHP ratio, colored by hpColor().
+// - Armor Bar: Adjacent vertical track showing live shield / armor points.
+// - Strict Menu Gating: Fully disabled when cfg::esp::health / armor are toggled OFF.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     // VERTICAL HEALTH & ARMOR BAR (RIGHT SIDE OF 2D BOX)
     // Strictly controlled by cfg::esp::health and cfg::esp::armor switches.

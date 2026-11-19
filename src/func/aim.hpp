@@ -1,9 +1,18 @@
 #pragma once
+// ============================================================================
+// MODULAR AIMBOT & TRAJECTORY ASSIST SUITE FORWARDER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Canonical inclusion header for the aimbot subsystem.
+// Forwards to src/func/aim/aim.hpp and establishes the namespace alias:
+//   namespace func::aim = ::aimbot;
+// ============================================================================
 
-// MODULAR AIM SUITE FORWARDING HEADER
-// Long-term maintainable architecture: modules reside in src/func/aim/
 #include "aim/aim.hpp"
 
 namespace func {
-    namespace aim = aimbot;
+    namespace aim = ::aimbot;
 }
+

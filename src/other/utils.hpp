@@ -1,13 +1,34 @@
 #pragma once
+// ============================================================================
+// IL2CPP MONO DICTIONARY PARSER & CHUNK MEMORY READER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Parses Unity Il2Cpp's internal System.Collections.Generic.Dictionary<TKey, TValue>
+// structure directly from external memory:
+//
+// IL2CPP 64-BIT DICTIONARY MEMORY LAYOUT:
+//   +0x18 -> _entries (pointer to managed array of entries)
+//   +0x20 -> _count (number of active elements)
+//   _entries + 0x20 -> start of Entry array data (skipping 32-byte Il2Cpp array header)
+//   Entry size: 0x18 bytes
+//     +0x00: int32_t hashCode
+//     +0x04: int32_t next
+//     +0x08: uint64_t key
+//     +0x10: uint64_t value (pointer to entity object, e.g. ReplicationEntity*)
+//
+// STEALTH & PERFORMANCE OPTIMIZATION:
+// Instead of issuing 3 individual syscalls per slot, read_block() reads runs of
+// 64 slots (0x600 bytes) in ONE contiguous memory read, completely eliminating
+// high syscall overhead during entity enumeration.
+// ============================================================================
+
 #include "memory.hpp"
 #include <cstdint>
 
-// Dictionary<Byte, Player> layout (IL2CPP 64-bit)
-//   +0x18 -> _entries (managed array header)
-//   +0x20 -> _count
-//   entries[i] = ptr + 0x20 (skip array header) + i * 0x18
-//   Entry.value = +0x10 (ReplicationEntity*)
 class MonoDictionary {
+
 public:
     uint64_t address;
 

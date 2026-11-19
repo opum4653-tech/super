@@ -1,7 +1,21 @@
 #pragma once
+// ============================================================================
+// DYNAMIC LASER TRACER LINE RENDERER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Draws directional vector lines from designated screen anchor points to enemy heads:
+// - Position 0: Screen Top Center (Classic overhead radar style)
+// - Position 1: Screen Crosshair Reticle Center (Laser tracking style with center glow dot)
+// - Position 2: Screen Bottom Center (Ground perspective style)
+// - Screen Boundary Guard: Suppresses drawing if target is off-screen.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace func::esp {
+
 
     // TRACER LINE (ORIGINS: 0 = Top, 1 = Center / Reticle Dot, 2 = Bottom)
     inline void drawTracer(ImDrawList* dl, const PlayerData& p, ImU32 colBase) {

@@ -1,4 +1,17 @@
 #pragma once
+// ============================================================================
+// FOV CIRCLE & ACTIVE TARGET LOCK VISUALIZER
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Renders the visual aim trigger radius and active target acquisition indicators:
+// - Outer FOV Ring: Displays exact screen pixel boundary where enemies will be acquired.
+// - Dynamic Scaling: Radius calculated from cfg::aim::get_fov_radius().
+// - Target Lock Ring: Red-and-white targeting reticle placed on target screen position
+//   whenever an enemy is actively locked by the aim hysteresis engine.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace aimbot {
@@ -6,6 +19,7 @@ namespace aimbot {
     // FOV CIRCLE & ACTIVE TARGET LOCK VISUALIZER
     // Scaled dynamically by cfg::aim::get_fov_radius()
     inline void render_fov(ImDrawList* dl) {
+
         if (!cfg::master_enabled) return;
         if ((!cfg::aim::enable && !cfg::aim::silent) || !cfg::aim::show_fov) return;
         if (!data::inMatch.load(std::memory_order_relaxed)) return;

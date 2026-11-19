@@ -1,4 +1,20 @@
 #pragma once
+// ============================================================================
+// 3D SILENT AIM BULLET TRAJECTORY STEERING ENGINE
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Calculates and steers the bullet departure vector directly in client weapon memory:
+// - Camera Rotation (0x614) is 100% UNTOUCHED. User retains complete manual control.
+// - Weapon Recoil is 100% UNTOUCHED (runs with standard game recoil patterns).
+// - Resolves LastAimingInfoFromWeapon (0xE58 primary, 0xE50 auxiliary fallback).
+// - Computes vector difference: diff = target3D - bulletOrigin.
+// - Critical Invariant: The vector written to AimingInfo + 0x40 MUST be a normalized
+//   unit vector (|v| == 1.0f). Unnormalized vectors corrupt Unity's LookRotation matrix.
+// - Clears interpolation flag (0x71) to ensure immediate hit alignment.
+// ============================================================================
+
 #include "common.hpp"
 
 namespace aimbot {
@@ -6,6 +22,7 @@ namespace aimbot {
     // 3D Silent bullet trajectory calculation and steering
     // Directly steers client-side bullet trajectory without touching camera rotation or weapon recoil.
     inline void apply_trajectory(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool isFiring) {
+
         if (!is_valid_ptr(localPlayer)) return;
 
         // Trajectory write should only execute when weapon is actively firing (or when trigger mode is Always In FOV)

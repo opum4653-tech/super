@@ -1,4 +1,24 @@
 #pragma once
+// ============================================================================
+// DIRECT SYSCALL EXTERNAL MEMORY ENGINE & PROCESS RESOLVER
+// ============================================================================
+// Project: crack_master
+//
+// ARCHITECTURAL FOUNDATION (ZERO-FOOTPRINT EXTERNAL RPM/WPM):
+// 1. Zero Open File Descriptors:
+//    Unlike legacy memory tools that hold open file descriptors to /proc/<pid>/mem,
+//    this engine issues direct kernel syscalls (SYS_process_vm_readv = 270,
+//    SYS_process_vm_writev = 271 on ARM64). /proc/self/fd/ remains completely clean.
+// 2. Direct Inline Assembly Syscalls (ARM64 svc #0):
+//    Bypasses libc wrappers to eliminate hooked function intercept windows.
+//    Register allocation: x8 = syscall number, x0-x5 = arguments.
+// 3. Volatile Stack Memory Scrubbing (wipe):
+//    Wipes path strings and buffer pages immediately after use to prevent
+//    forensic recovery from core dumps or /proc/self/mem inspection.
+// 4. Jittered PID & Maps Scanning:
+//    Employs dynamic random time jitter (1.8s - 2.7s) during process sweeps
+//    to avoid periodic detection patterns.
+// ============================================================================
 
 #include <cstdint>
 #include <cstring>
@@ -9,14 +29,15 @@
 #include "../protect/oxorany.hpp"
 
 namespace proc {
-    inline int      pid = -1;
-    inline uint64_t lib = 0;
+    inline int      pid = -1;       // Target game process PID
+    inline uint64_t lib = 0;        // Base virtual address of libil2cpp.so
     // Last target pid that was confirmed by name. get_pid() re-checks this one
     // entry instead of re-walking all of /proc on every poll.
     inline int      pid_cache = 0;
 }
 
 namespace sys {
+
     #if defined(__aarch64__)
     static constexpr long SYS_openat     = 56;
     static constexpr long SYS_close      = 57;

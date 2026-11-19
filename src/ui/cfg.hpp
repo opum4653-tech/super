@@ -1,9 +1,27 @@
 #pragma once
+// ============================================================================
+// CENTRALIZED RUNTIME CONFIGURATION & UI STATE STORE
+// ============================================================================
+// Project: crack_master
+//
+// SYSTEM ROLE:
+// Holds all runtime configuration flags, sliders, and color settings.
+// Read concurrently by ESP renderers (src/func/esp/) and Aimbot threads (src/func/aim/).
+// Modified directly by the ImGui user interface (src/ui/menu.cpp).
+//
+// HIGHLIGHTS:
+// - master_enabled: Single master toggle that enables/disables the entire feature set
+//   without resetting the user's specific sub-feature preferences.
+// - any_feature_enabled(): Gate used by data::update() to sleep/skip memory scraping
+//   when all features are deactivated.
+// ============================================================================
+
 #include "imgui.h"
 
 extern float g_sw;
 
 namespace cfg {
+
     inline bool master_enabled = false; // Global Master Switch: controls all features, preserves selection state
 
 namespace esp {
