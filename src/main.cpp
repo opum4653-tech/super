@@ -162,13 +162,22 @@ static int start_overlay() {
     });
     attach_worker.detach();
 
-    // MAIN RENDER LOOP
+    // MAIN RENDER LOOP (PRECISE 60 FPS THERMAL PACING)
+    constexpr int64_t target_frame_us = 16666; // 60 FPS
     while (main_thread_flag) {
+        auto frame_start = std::chrono::steady_clock::now();
         global_anim_time += 0.016f;
         drawBegin();
         ui::menu::render();
         drawEnd();
-        usleep(16000);
+
+        auto frame_end = std::chrono::steady_clock::now();
+        int64_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start).count();
+        if (elapsed_us < target_frame_us) {
+            usleep(static_cast<useconds_t>(target_frame_us - elapsed_us));
+        } else {
+            std::this_thread::yield();
+        }
     }
 
     shutdown();

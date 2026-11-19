@@ -136,6 +136,11 @@ namespace aimbot {
                     score = enemy.distance;
                 }
 
+                // Prioritize standing threats over crawling/knocked players
+                if (enemy.isKnocked) {
+                    score += 5000.0f;
+                }
+
                 if (score < bestScore) {
                     bestScore = score;
                     bestEnemy = &enemy;

@@ -27,6 +27,15 @@ namespace data {
     static std::unordered_map<uint64_t, int>  g_visCounter;
     static std::unordered_map<uint64_t, bool> g_visStable;
 
+    static inline bool is_valid_matrix(const matrix& m) {
+        if (std::isnan(m.m11) || std::isnan(m.m22) || std::isnan(m.m33) || std::isnan(m.m44)) return false;
+        if (std::isinf(m.m11) || std::isinf(m.m22) || std::isinf(m.m33) || std::isinf(m.m44)) return false;
+        float col1 = fabsf(m.m11) + fabsf(m.m21) + fabsf(m.m31);
+        float col2 = fabsf(m.m12) + fabsf(m.m22) + fabsf(m.m32);
+        float col4 = fabsf(m.m14) + fabsf(m.m24) + fabsf(m.m34) + fabsf(m.m44);
+        return (col1 > 0.05f && col2 > 0.05f && col4 > 0.05f);
+    }
+
     // Every field read directly off the player object sits between 0x70 and
     // 0x860 (Player::HP .. Player::IsFiring). Pulling that span in a single
     // process_vm_readv replaces roughly a dozen syscalls per player per tick
@@ -248,27 +257,65 @@ namespace data {
             return;
         }
 
-// Camera chain
+// Camera chain — Multi-candidate resolution with matrix validation (pewpew reference pattern)
         uint64_t Follow = 0, Cam = 0, IntPtr = 0;
+        bool matrix_resolved = false;
 
+        auto try_matrix = [&](uint64_t intPtrCandidate) -> bool {
+            if (!intPtrCandidate) return false;
+            matrix vm = rpm<matrix>(intPtrCandidate + Offsets::Camera_Matrix);
+            if (is_valid_matrix(vm)) {
+                viewMatrix = vm;
+                matrix_resolved = true;
+                return true;
+            }
+            return false;
+        };
+
+        // Candidate 1: Standard FollowCamera -> Camera -> IntPtr
         Follow = rpm<uint64_t>(localPlayer + Offsets::Player_Camera);
-        if (Follow) Cam = rpm<uint64_t>(Follow + Offsets::Camera_Follow);
-        if (Cam)    IntPtr = rpm<uint64_t>(Cam + Offsets::Camera_IntPtr);
-
-        if (!IntPtr) {
-            // Fallback offset alternatif
-            Follow = rpm<uint64_t>(localPlayer + 0x690);
-            if (Follow) Cam = rpm<uint64_t>(Follow + 0x30);
-            if (Cam)    IntPtr = rpm<uint64_t>(Cam + 0x10);
+        if (Follow) {
+            Cam = rpm<uint64_t>(Follow + Offsets::Camera_Follow);
+            if (Cam) {
+                IntPtr = rpm<uint64_t>(Cam + Offsets::Camera_IntPtr);
+                try_matrix(IntPtr);
+            }
         }
 
-        if (!IntPtr) {
+        // Candidate 2: FollowCamera + 0x30 -> 0x10
+        if (!matrix_resolved) {
+            Follow = rpm<uint64_t>(localPlayer + 0x690);
+            if (Follow) {
+                Cam = rpm<uint64_t>(Follow + 0x30);
+                if (Cam) {
+                    IntPtr = rpm<uint64_t>(Cam + 0x10);
+                    try_matrix(IntPtr);
+                }
+            }
+        }
+
+        // Candidate 3: BaseGame + 0xD8 -> 0x20 -> 0x10 (CameraBase fallback)
+        if (!matrix_resolved && BaseGame) {
+            uint64_t camMgr = rpm<uint64_t>(BaseGame + 0xD8);
+            if (camMgr) {
+                uint64_t c20 = rpm<uint64_t>(camMgr + 0x20);
+                if (c20) {
+                    try_matrix(rpm<uint64_t>(c20 + 0x10));
+                }
+                if (!matrix_resolved) {
+                    uint64_t c28 = rpm<uint64_t>(camMgr + 0x28);
+                    if (c28) {
+                        try_matrix(rpm<uint64_t>(c28 + 0x10));
+                    }
+                }
+            }
+        }
+
+        if (!matrix_resolved && !is_valid_matrix(viewMatrix)) {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
         }
-
-        viewMatrix = rpm<matrix>(IntPtr + Offsets::Camera_Matrix);
 
 // Local position
         Vector3 localPos = Vector3::Zero();
@@ -371,6 +418,16 @@ namespace data {
             Vector3 toeScreen = boneScreen(span.at<uint64_t>(Offsets::Bone_LeftToe));
             if (toeScreen.z < 0.001f) continue;
 
+            // Knocked state check (phyxData 0x1D60 -> maybeDead 0x20 -> isKnocked 0x10 == 8)
+            bool isKnocked = false;
+            uint64_t phyx = rpm<uint64_t>(enemy + Offsets::Player::PhyXData);
+            if (phyx) {
+                uint64_t md = rpm<uint64_t>(phyx + Offsets::Player::PhyX_MaybeDead);
+                if (md && rpm<int>(md + Offsets::Player::PhyX_IsKnocked) == 8) {
+                    isKnocked = true;
+                }
+            }
+
             // Build
             PlayerData pd;
             readName(span, pd.name, sizeof(pd.name));
@@ -383,6 +440,7 @@ namespace data {
             pd.headWorld  = headWorld;
             pd.isVisible  = visible;
             pd.isBot      = isBot;
+            pd.isKnocked  = isKnocked;
             pd.distance   = dist;
             pd.curHP      = curHP;
             pd.maxHP      = maxHP;

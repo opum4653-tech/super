@@ -66,6 +66,9 @@ namespace Offsets {
         constexpr uintptr_t Attributes_Max       = 0x770;   // PlayerAttributes Max
         constexpr uintptr_t PhantomState         = 0x814;   // Boolean: Ghost / Phantom mode flag on Player
         constexpr uintptr_t FlightFlag           = 0x2098;  // Boolean: Elevation flight state flag on Player
+        constexpr uintptr_t PhyXData             = 0x1D60;  // Physics / Collision & Downed state
+        constexpr uintptr_t PhyX_MaybeDead       = 0x20;    // Pointer to state
+        constexpr uintptr_t PhyX_IsKnocked       = 0x10;    // Int32 == 8 when player is knocked/downed
     }
 
 // Transform Hierarchy Traversal (Unity Matrix Resolution)

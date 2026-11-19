@@ -40,8 +40,9 @@ namespace func::esp {
 
             float cx = (tl.x + br.x) * 0.5f;
 
-            ImU32 colBase = p.isVisible ? toU32(cfg::esp::box_visible)
-                                        : toU32(cfg::esp::box_col);
+            ImU32 colBase = p.isKnocked ? IM_COL32(255, 65, 65, 255)
+                                        : (p.isVisible ? toU32(cfg::esp::box_visible)
+                                                       : toU32(cfg::esp::box_col));
             colBase = fadeDist(colBase, p.distance, cfg::esp::max_range);
 
             // 1. Tracer Line (Top, Center Reticle Dot, or Bottom)
