@@ -3,6 +3,7 @@
 #include "Android_draw/draw.h"
 #include "Android_touch/TouchHelperA.h"
 #include "other/settings_guard.hpp"
+#include "other/memory.hpp"
 #include "func/esp.hpp"
 #include "func/aim.hpp"
 #include "cfg.hpp"
@@ -584,7 +585,8 @@ namespace ui::menu {
 
                     ImGui::Text("Overlay FPS: %.1f", io.Framerate);
                     ImGui::Text("Resolution: %.0f x %.0f", realW, realH);
-                    ImGui::Text("Architecture: Direct DMA Kernel Memory");
+                    ImGui::Text("Driver Backend: %s", driver ? driver->get_driver_name() : "KPM (Dual-Engine)");
+                    ImGui::Text("Architecture: Ring-0 Kernel Patch Module");
                     ImGui::Text("Screen Capture: Stealth / Clean Stream");
 
                     handleTouchScroll();

@@ -29,7 +29,7 @@ namespace data {
 
     // Every field read directly off the player object sits between 0x70 and
     // 0x860 (Player::HP .. Player::IsFiring). Pulling that span in a single
-    // process_vm_readv replaces roughly a dozen syscalls per player per tick
+    // KPM kernel driver read replaces roughly a dozen calls per player per tick
     // with one, which is the point: the read pattern stops looking like a
     // field-by-field scrape of the same object.
     //

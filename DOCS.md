@@ -8,7 +8,7 @@ This document defines the architecture, workflow, and operational contracts of t
 
 - **Supported Mod Engines:**
   1. **NINMODS Kernel Mod** (`ninmods-kernel`): Native kernel-level overlay engine interacting with kernel drivers.
-  2. **NINMODS External Mod** (`gemini-cli`): Standalone native memory overlay engine.
+  2. **NINMODS KPM Mod Engine** (`gemini-cli`): Ring-0 Kernel Patch Module (TB KPM & Neo KPM) native memory overlay engine. Zero external userland footprint.
 - **Execution Architecture:**
   - Both mod engines compile directly into pure native ARM64 ELF binaries.
   - Zero intermediate shell wrappers (`.sh` files eliminated).
