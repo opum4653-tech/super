@@ -29,6 +29,8 @@ struct PlayerData {
     Vector3  Toe;           // Projected LeftToe position (used for bottom-of-box calculation)
     Vector3  headWorld;     // Unprojected 3D Head World Space coordinates (used for 3D Silent Aim trajectory)
     Vector3  hipWorld;      // Unprojected 3D Hip World Space coordinates (used for Chest / Body targeting)
+    Vector3  spineWorld;    // Unprojected 3D Spine World Space coordinates (bone::Spine)
+    Vector3  neckWorld;     // Unprojected 3D Neck World Space coordinates (interpolated head->spine)
 
     // Entity State & Gameplay Meta
     bool     isVisible;     // True if player mesh is visible to local camera (Avatar::Uma_Visible)
@@ -46,12 +48,22 @@ struct PlayerData {
 
     PlayerData()
         : addr(0),
-          Head(Vector3::Zero()), Toe(Vector3::Zero()), headWorld(Vector3::Zero()), hipWorld(Vector3::Zero()),
+          Head(Vector3::Zero()), Toe(Vector3::Zero()),
+          headWorld(Vector3::Zero()), hipWorld(Vector3::Zero()),
+          spineWorld(Vector3::Zero()), neckWorld(Vector3::Zero()),
           isVisible(false), isBot(false), isKnocked(false), distance(0.f),
           curHP(0), maxHP(0), curArmor(0),
           isFiring(false), isGrounded(true), speed(0.f),
           weaponType(-1)
     { name[0] = 0; }
+
+    Vector3 getTargetWorld(int targetPos, float headBias = 0.08f) const {
+        switch (targetPos) {
+            case 1:  return (neckWorld != Vector3::Zero()) ? neckWorld : (headWorld - Vector3(0.0f, 0.20f, 0.0f));
+            case 2:  return (hipWorld != Vector3::Zero()) ? hipWorld : (spineWorld != Vector3::Zero() ? spineWorld : (headWorld - Vector3(0.0f, 0.50f, 0.0f)));
+            default: return Vector3(headWorld.x, headWorld.y + headBias, headWorld.z);
+        }
+    }
 };
 
 // ----------------------------------------------------------------------------

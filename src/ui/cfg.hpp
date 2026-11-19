@@ -68,7 +68,8 @@ namespace aim {
     inline float aim_fov          = 35.0f;  // AimFov (0° - 180°), matching reference calculation
     inline float fov_radius       = 180.0f; // Fallback pixel radius
     inline float smooth           = 5.0f;   // Safe default: smooth lerp (1=snap, 10=slow). Range 3-8 looks natural.
-    inline float headshot_rate    = 100.0f; // 100% default headshot rate when active.
+    inline float headshot_rate    = 85.0f;  // Safe 85% default rate to prevent server heuristic ban
+    inline float head_bias        = 0.08f;  // Vertical bias (+0.08m) for dead-center headshot alignment
     inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance

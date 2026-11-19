@@ -138,9 +138,11 @@ namespace aimbot {
         // Headshot evaluation & collider mapping (strictly fire-gated)
         bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.isFiring);
 
-        // 3D Silent bullet trajectory steering (Aim Silent from STORM_MODS)
+        // 3D Silent bullet trajectory steering (Aim Silent from pewpew & STORM_MODS)
         if (cfg::aim::silent) {
             apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
+        } else {
+            silent::clear_silent_data();
         }
 
         // Real Camera Aim Rotation Assist (AimBot / AimHard from STORM_MODS)
@@ -153,6 +155,8 @@ namespace aimbot {
         while (aim_thread_running().load(std::memory_order_relaxed)) {
             if (cfg::master_enabled && (cfg::aim::enable || cfg::aim::silent || cfg::motion::air_flight || cfg::motion::phantom_mode)) {
                 update();
+            } else {
+                silent::clear_silent_data();
             }
 
             uint64_t lp = data::localPlayerAddr.load(std::memory_order_relaxed);
@@ -171,11 +175,13 @@ namespace aimbot {
 
     inline void thread_start() {
         if (aim_thread_running().exchange(true)) return;
+        silent::thread_start();
         std::thread(loop).detach();
     }
 
     inline void thread_stop() {
         aim_thread_running().store(false);
+        silent::thread_stop();
         motion::reset();
         std::lock_guard<std::mutex> lk(g_targetMutex);
         g_currentTarget.valid = false;

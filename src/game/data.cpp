@@ -505,6 +505,17 @@ namespace data {
             Vector3 hipWorld = Vector3::Zero();
             if (hipNode) hipWorld = GetNodePosition(hipNode);
 
+            // Spine 3D World Position & Interpolated Neck World Position (pewpew pattern)
+            uint64_t spineNode = span.at<uint64_t>(Offsets::Bone::Breast);
+            Vector3 spineWorld = Vector3::Zero();
+            if (spineNode) spineWorld = GetNodePosition(spineNode);
+            if (spineWorld == Vector3::Zero() || !std::isfinite(spineWorld.x)) {
+                spineWorld = (hipWorld != Vector3::Zero()) ? hipWorld : headWorld;
+            }
+            Vector3 neckWorld = (spineWorld != headWorld)
+                ? (headWorld + (spineWorld - headWorld) * 0.35f)
+                : (headWorld - Vector3(0.0f, 0.20f, 0.0f));
+
             float dist = calculate_distance(localPos, headWorld);
             if (dist < 0.8f || dist > cfg::esp::max_range) continue;
 
@@ -545,6 +556,8 @@ namespace data {
             pd.Toe        = toeScreen;
             pd.headWorld  = headWorld;
             pd.hipWorld   = hipWorld;
+            pd.spineWorld = spineWorld;
+            pd.neckWorld  = neckWorld;
             pd.isVisible  = visible;
             pd.isBot      = isBot;
             pd.isKnocked  = isKnocked;

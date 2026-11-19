@@ -726,6 +726,11 @@ namespace ui::menu {
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##HeadBias", &cfg::aim::head_bias, -0.20f, 0.30f, "%.2f m");
+                    ImGui::TextDisabled("Head Center Alignment (Bias)");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 1.0f, 25.0f, "%.1f");
                     ImGui::TextDisabled("Aim Smoothness");
                 }
