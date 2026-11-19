@@ -14,9 +14,6 @@ namespace proc {
     // Last target pid that was confirmed by name. get_pid() re-checks this one
     // entry instead of re-walking all of /proc on every poll.
     inline int      pid_cache = 0;
-    // proc::pm removido — pagemap FD ficava aberto e nunca era lido,
-    // deixando um handle pro /proc/<pid>/pagemap detectável em /proc/self/fd.
-    inline int      pm  = -1;   // mantido só pra código legado, sempre = -1
 }
 
 namespace sys {

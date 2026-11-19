@@ -10,7 +10,6 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/system_properties.h>
-#include <jni.h>
 #include <curl/curl.h>
 #include "../protect/oxorany.hpp"
 
@@ -109,41 +108,12 @@ static int make_ca_memfd() {
 #endif
 }
 
-static constexpr unsigned char K_TELEGRAM_URL_BYTES[20] = {
-    0x0A, 0x16, 0x16, 0x12, 0x11, 0x58, 0x4D, 0x4D, 0x16, 0x4C,
-    0x0F, 0x07, 0x4D, 0x0C, 0x0B, 0x0C, 0x0F, 0x0D, 0x06, 0x11
-};
-static constexpr unsigned char K_TELEGRAM_URL_SEED = 0x62;
-
-static std::string decode_string(const unsigned char* bytes, size_t len, unsigned char seed) {
-    std::string s;
-    s.reserve(len);
-    for (size_t i = 0; i < len; ++i) {
-        s.push_back(static_cast<char>(bytes[i] ^ seed));
-    }
-    return s;
-}
-
-static std::string normalize(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-    for (char c : input) {
-        if (!std::isspace(static_cast<unsigned char>(c))) {
-            out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-        }
-    }
-    return out;
-}
-
 static std::mutex s_lic_mutex;
 static std::string s_stored_key = "";
 static time_t s_online_expiry_ts = 0;
 static bool s_online_verified = false;
 static bool s_is_valid = false;
 static bool s_initialized = false;
-
-static JavaVM* s_jvm = nullptr;
-static jobject s_activity = nullptr;
 
 static void evaluate_state(time_t now) {
     if (s_stored_key.empty()) {
@@ -448,74 +418,6 @@ namespace lic {
         }
 
         return false;
-    }
-
-    static void open_url_jni(const char* url) {
-        if (!url || !*url) return;
-
-        if (s_jvm && s_activity) {
-            JNIEnv* env = nullptr;
-            jint res = s_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
-            bool attached = false;
-            if (res == JNI_EDETACHED) {
-                if (s_jvm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached = true;
-            }
-            if (env) {
-                jclass uriClass = env->FindClass("android/net/Uri");
-                if (uriClass) {
-                    jmethodID parseMethod = env->GetStaticMethodID(uriClass, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
-                    if (parseMethod) {
-                        jstring urlStr = env->NewStringUTF(url);
-                        if (urlStr) {
-                            jobject uriObj = env->CallStaticObjectMethod(uriClass, parseMethod, urlStr);
-                            if (uriObj) {
-                                jclass intentClass = env->FindClass("android/content/Intent");
-                                if (intentClass) {
-                                    jmethodID intentInit = env->GetMethodID(intentClass, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V");
-                                    if (intentInit) {
-                                        jstring actionView = env->NewStringUTF("android.intent.action.VIEW");
-                                        if (actionView) {
-                                            jobject intentObj = env->NewObject(intentClass, intentInit, actionView, uriObj);
-                                            if (intentObj) {
-                                                jmethodID addFlagsMethod = env->GetMethodID(intentClass, "addFlags", "(I)Landroid/content/Intent;");
-                                                if (addFlagsMethod) {
-                                                    env->CallObjectMethod(intentObj, addFlagsMethod, 0x10000000);
-                                                }
-                                                jclass activityClass = env->GetObjectClass(s_activity);
-                                                if (activityClass) {
-                                                    jmethodID startActivityMethod = env->GetMethodID(activityClass, "startActivity", "(Landroid/content/Intent;)V");
-                                                    if (startActivityMethod) {
-                                                        env->CallVoidMethod(s_activity, startActivityMethod, intentObj);
-                                                    }
-                                                    env->DeleteLocalRef(activityClass);
-                                                }
-                                                env->DeleteLocalRef(intentObj);
-                                            }
-                                            env->DeleteLocalRef(actionView);
-                                        }
-                                    }
-                                    env->DeleteLocalRef(intentClass);
-                                }
-                                env->DeleteLocalRef(uriObj);
-                            }
-                            env->DeleteLocalRef(urlStr);
-                        }
-                    }
-                    env->DeleteLocalRef(uriClass);
-                }
-                if (attached) s_jvm->DetachCurrentThread();
-                return;
-            }
-        }
-
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "am start -a android.intent.action.VIEW -d '%s' >/dev/null 2>&1", url);
-        system(cmd);
-    }
-
-    void open_update_page() {
-        std::string url = decode_string(K_TELEGRAM_URL_BYTES, sizeof(K_TELEGRAM_URL_BYTES), K_TELEGRAM_URL_SEED);
-        open_url_jni(url.c_str());
     }
 
 }

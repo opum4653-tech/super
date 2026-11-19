@@ -757,6 +757,7 @@ namespace ui::menu {
         if (g_should_exit) {
             main_thread_flag = false;
             Touch_Close();
+            aimbot::thread_stop();
             data::thread_stop();
             shutdown();
             settings_guard::restore();

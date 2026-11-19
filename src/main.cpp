@@ -16,6 +16,7 @@
 #include <chrono>
 #include <unistd.h>
 #include <sys/prctl.h>
+#include <csignal>
 #include <string>
 #include <atomic>
 
@@ -182,9 +183,20 @@ static int start_overlay() {
 
     shutdown();
     Touch_Close();
+    aimbot::thread_stop();
     data::thread_stop();
     settings_guard::restore();
     return 0;
+}
+
+// EMERGENCY CLEANUP (RESTORING SYSTEM INTEGRITY ON EXTERNAL KILL / SIGNAL)
+static void emergency_cleanup(int sig) {
+    main_thread_flag = false;
+    settings_guard::restore();
+    Touch_Close();
+    aimbot::thread_stop();
+    data::thread_stop();
+    _exit(0);
 }
 
 // MAIN
@@ -206,6 +218,12 @@ int main(int argc, char** argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
+    // Register cleanup traps to guarantee settings & touch nodes are always restored
+    std::signal(SIGINT, emergency_cleanup);
+    std::signal(SIGTERM, emergency_cleanup);
+    std::signal(SIGHUP, emergency_cleanup);
+    std::signal(SIGPIPE, SIG_IGN);
+
     // Mask process name immediately upon entry to gemini-cli
     mask_process_name(argc, argv, "gemini-cli");
 
@@ -214,6 +232,16 @@ int main(int argc, char** argv) {
     if (!check_license_gate(argc, argv)) {
         return 1;
     }
+
+    // Scrub license key from argv and environment immediately to prevent /proc/self/cmdline and /proc/self/environ leakage
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i]) {
+            size_t l = strlen(argv[i]);
+            memset(argv[i], 0, l);
+        }
+    }
+    unsetenv("NIN_LICENSE_KEY");
+    unsetenv("NIN_DEVICE_HWID");
 
     return start_overlay();
 }
