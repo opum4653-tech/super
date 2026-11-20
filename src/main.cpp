@@ -206,26 +206,26 @@ static int start_overlay() {
     });
     attach_worker.detach();
 
-    // MAIN RENDER LOOP (PRECISE 60 FPS THERMAL PACING)
-    // Microsecond timing prevents CPU spinning and battery drain while guaranteeing smooth 60fps
-    constexpr int64_t target_frame_us = 16666; // 16.666 ms per frame (60 FPS)
+    // NATIVE HARDWARE DISPLAY REFRESH RATE
+    // Zero artificial FPS throttling: runs smoothly at the device's native display
+    // refresh rate (60Hz, 90Hz, 120Hz, 144Hz). eglSwapBuffers in drawEnd()
+    // natively synchronizes with Android SurfaceFlinger hardware VSYNC.
+    auto last_frame_time = std::chrono::steady_clock::now();
     while (main_thread_flag) {
-        auto frame_start = std::chrono::steady_clock::now();
-        global_anim_time += 0.016f;
+        auto now = std::chrono::steady_clock::now();
+        float dt = std::chrono::duration<float>(now - last_frame_time).count();
+        last_frame_time = now;
+        if (dt > 0.0f && dt < 0.1f) {
+            global_anim_time += dt;
+        } else {
+            global_anim_time += 0.016f;
+        }
 
         drawBegin();            // Prepares new ImGui frame & polls orientation
         Touch_ClearUiRects();
         ui::menu::render();     // Renders ImGui menu, floating logo, and calls func::esp::draw()
         Touch_CommitUiRects();
-        drawEnd();              // Swaps EGL buffers onto native display
-
-        auto frame_end = std::chrono::steady_clock::now();
-        int64_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start).count();
-        if (elapsed_us < target_frame_us) {
-            usleep(static_cast<useconds_t>(target_frame_us - elapsed_us));
-        } else {
-            std::this_thread::yield();
-        }
+        drawEnd();              // Native hardware VSYNC swap via eglSwapBuffers
     }
 
     // SYMMETRICAL REVERSE CLEANUP ON NORMAL EXIT
