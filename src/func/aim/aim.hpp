@@ -59,6 +59,7 @@ namespace aimbot {
             s_smoothDir = Vector3::Zero();
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
+            silent::clear_silent_data();
             return;
         }
 
@@ -67,6 +68,7 @@ namespace aimbot {
             s_lockTimeoutTicks = 0;
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
+            silent::clear_silent_data();
             return;
         }
 
@@ -76,13 +78,24 @@ namespace aimbot {
             s_lockTimeoutTicks = 0;
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
+            silent::clear_silent_data();
             return;
         }
 
         TargetAcquisitionResult acq = acquire_target(localPlayer);
-        if (!acq.valid) {
+        // Instant Death / Target Lost Reversion:
+        // The microsecond the target dies (curHP <= 0 or isDead) or leaves FOV, immediately
+        // clear write buffers so game memory instantly returns to 100% natural state.
+        if (!acq.valid || acq.target.curHP <= 0 || acq.target.isDead) {
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
+            silent::clear_silent_data();
+            return;
+        }
+
+        // Firing Invariant: If not actively firing, keep memory 100% pristine and unwritten
+        if (!acq.isFiring) {
+            silent::clear_silent_data();
             return;
         }
 

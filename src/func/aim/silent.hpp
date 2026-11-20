@@ -46,7 +46,7 @@ namespace silent {
         }
     }
 
-    // High-speed writer thread — equivalent to SilentAimThread in pewpew
+    // High-speed writer thread — strictly active only while firing
     static void writer_loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             if (!g_hasData.load(std::memory_order_relaxed) || g_hitObj == 0) {
@@ -54,7 +54,20 @@ namespace silent {
                 continue;
             }
 
-            // Continuous memory write strictly during active firing
+            // Real-time Firing Guard: immediately abort and clear if trigger released
+            uint64_t lp = data::localPlayerAddr.load(std::memory_order_relaxed);
+            bool isFiring = false;
+            if (lp) {
+                isFiring = rpm<bool>(lp + Offsets::Player_IsFiring) || rpm<bool>(lp + Offsets::Player_IsFiring_Alt);
+            }
+
+            if (!isFiring) {
+                clear_silent_data();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                continue;
+            }
+
+            // Ephemeral memory write strictly during active weapon discharge
             {
                 std::lock_guard<std::mutex> lock(g_silent_lock);
                 if (g_hasData.load(std::memory_order_relaxed) && g_hitObj != 0) {
