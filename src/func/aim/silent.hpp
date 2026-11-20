@@ -36,13 +36,22 @@ namespace silent {
     inline std::mutex        g_silent_lock;
     inline uint64_t          g_hitObj = 0;
     inline Vector3           g_targetDir = {0.f, 0.f, 0.f};
+    inline Vector3           g_originalDir = {0.f, 0.f, 1.f};
+    inline std::atomic<bool> g_hasOriginal{false};
     inline std::atomic<bool> g_hasData{false};
 
+    // Sub-Millisecond Active Symmetrical Restore (< 0.1ms latency):
+    // The microsecond firing stops or target dies, immediately write back the original
+    // natural camera forward vector rather than passively waiting 10-16ms for game ticks.
     inline void clear_silent_data() {
         if (g_hasData.load(std::memory_order_relaxed) || g_hitObj != 0) {
             std::lock_guard<std::mutex> lock(g_silent_lock);
+            if (g_hitObj != 0 && g_hasOriginal.load(std::memory_order_relaxed)) {
+                wpm<Vector3>(g_hitObj + Offsets::AimInfo_Direction, g_originalDir);
+            }
             g_hasData.store(false, std::memory_order_relaxed);
             g_hitObj = 0;
+            g_hasOriginal.store(false, std::memory_order_relaxed);
         }
     }
 
@@ -161,9 +170,16 @@ namespace silent {
             return;
         }
 
-        // Publish to high-speed writer thread
+        // Publish to high-speed writer thread & capture initial natural direction for active restore
         {
             std::lock_guard<std::mutex> lock(g_silent_lock);
+            if (!g_hasOriginal.load(std::memory_order_relaxed)) {
+                Vector3 cur = rpm<Vector3>(aimInfoWeapon + Offsets::AimInfo_Direction);
+                if (std::isfinite(cur.x) && cur.sqrMagnitude() > 0.01f) {
+                    g_originalDir = SafeNormalize(cur);
+                    g_hasOriginal.store(true, std::memory_order_relaxed);
+                }
+            }
             g_hitObj = aimInfoWeapon;
             g_targetDir = normDir;
             g_hasData.store(true, std::memory_order_relaxed);
