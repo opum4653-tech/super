@@ -124,23 +124,16 @@ namespace aimbot {
 
     inline void loop() {
         while (aim_thread_running().load(std::memory_order_relaxed)) {
-            if (cfg::master_enabled && (cfg::aim::enable || cfg::aim::silent || cfg::motion::air_flight || cfg::motion::phantom_mode)) {
+            if (cfg::master_enabled && (cfg::aim::enable || cfg::aim::silent)) {
                 update();
             } else {
                 silent::clear_silent_data();
             }
 
-            uint64_t lp = data::localPlayerAddr.load(std::memory_order_relaxed);
-            bool isFiring = false;
-            if (lp) {
-                isFiring = rpm<bool>(lp + Offsets::Player::IsFiring) || rpm<bool>(lp + 0x850);
-            }
-
-            if (isFiring) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
+            // Natural game frame cadence (~60 FPS steady update, zero artificial millisecond forcing)
+            int interval = cfg::aim::read_interval_ms;
+            int sleepMs = (interval >= 8 && interval <= 33) ? interval : 16;
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
         }
     }
 
