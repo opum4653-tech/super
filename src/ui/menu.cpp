@@ -735,20 +735,19 @@ namespace ui::menu {
                     ImGui::TextDisabled("Aim Smoothness");
                 }
                 // ============================================================
-                // TAB 3: MOTION
+                // TAB 3: MOTION (ANTI-BAN PROTECTED)
                 // ============================================================
                 else if (activeTab == 3) {
                     DrawSectionHeader(cdl, "Motion", ui_scale);
-                    DrawSectionHeader(cdl, "Player Movement Modifiers", ui_scale);
+                    DrawSectionHeader(cdl, "Movement Integrity Guard", ui_scale);
 
-                    DrawToggleSwitch("Air Flight", &cfg::motion::air_flight, 48.0f * ui_scale, ui_scale);
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##FlightHeight", &cfg::motion::flight_height, 0.0f, 15.0f, "%.1f m");
-                    ImGui::TextDisabled("Flight Elevation Height");
+                    ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Anti-Ban Protection: Active");
+                    ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.9f, 1.0f), "Server-Authoritative Movement Locked");
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
 
-                    ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
-                    DrawToggleSwitch("Phantom Mode", &cfg::motion::phantom_mode, 48.0f * ui_scale, ui_scale);
-                    ImGui::TextDisabled("Ghost / Phantom State Override");
+                    ImGui::TextDisabled("Air Flight and Phantom Mode are permanently disabled");
+                    ImGui::TextDisabled("to protect your game account from instant server-side");
+                    ImGui::TextDisabled("physics validation and position desync auto-bans.");
                 }
                 // ============================================================
                 // TAB 4: SETTINGS

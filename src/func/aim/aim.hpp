@@ -26,57 +26,15 @@
 
 namespace aimbot {
 
-    // Real Camera Aim Rotation Assist (AimBot / AimHard from STORM_MODS)
-    // Directly aligns character and crosshair rotation with target bone
+    // Real Camera Aim Assist (Safe Anti-Ban Zero-Op)
+    // Direct memory mutation of Player::Rotation (0x61C) creates client-side touch desync
+    // and server-side angle snap anomalies. Targeting is strictly and safely handled by
+    // normalized silent trajectory steering (apply_trajectory) without mutating player camera in memory.
     inline void apply_camera_aim(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool triggerActive) {
-        if (!is_valid_ptr(localPlayer) || !triggerActive) return;
-
-        // Origin point for aim direction (from Camera matrix or local player head)
-        Vector3 camPos = GetCameraPosition(data::viewMatrix);
-        if (camPos == Vector3::Zero()) {
-            uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
-            if (localHead) camPos = GetNodePosition(localHead);
-        }
-        if (camPos == Vector3::Zero() || !std::isfinite(camPos.x)) return;
-
-        // Target bone coordinate
-        Vector3 target3D = target.headWorld;
-        if (target3D == Vector3::Zero() || !std::isfinite(target3D.x)) return;
-
-        Vector3 hipPos = target.hipWorld;
-        bool hasHip = (hipPos != Vector3::Zero() && std::isfinite(hipPos.x));
-        Vector3 chestPos = hasHip ? (target3D + (hipPos - target3D) * 0.35f) : (target3D - Vector3(0.0f, 0.28f, 0.0f));
-        Vector3 pelvisPos = hasHip ? hipPos : (target3D - Vector3(0.0f, 0.55f, 0.0f));
-
-        if (cfg::aim::target_bone == 1) {
-            target3D = chestPos;
-        } else if (cfg::aim::target_bone == 2) {
-            target3D = pelvisPos;
-        } else {
-            // Target bone 0 (Head):
-            if (cfg::aim::headshot_rate > 0.0f) {
-                if (!lockToHead) {
-                    target3D = chestPos;
-                }
-            }
-            // else directly target3D (headWorld)
-        }
-
-        Vector3 dir = target3D - camPos;
-        if (dir.sqrMagnitude() <= 1e-4f) return;
-
-        Vector3 normDir = SafeNormalize(dir);
-        if (!std::isfinite(normDir.x) || normDir == Vector3::Zero()) return;
-
-        // Calculate target orientation Quaternion
-        Quaternion targetRot = Quaternion::LookRotation(normDir, Vector3(0.0f, 1.0f, 0.0f));
-
-        // Smooth rotation interpolation (humanized spherical interpolation to prevent snap bans)
-        float smoothVal = cfg::aim::smooth;
-        float t = (smoothVal <= 0.0f) ? 0.35f : std::clamp(1.0f / (smoothVal + 0.1f), 0.05f, 0.50f);
-        Quaternion currentRot = rpm<Quaternion>(localPlayer + Offsets::Player::Rotation);
-        Quaternion blended = Quaternion::Slerp(currentRot, targetRot, t);
-        wpm<Quaternion>(localPlayer + Offsets::Player::Rotation, blended);
+        (void)localPlayer;
+        (void)target;
+        (void)lockToHead;
+        (void)triggerActive;
     }
 
     inline std::atomic<bool>& aim_thread_running() {
@@ -138,14 +96,14 @@ namespace aimbot {
         // Headshot evaluation & collider mapping (strictly fire-gated)
         bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.isFiring);
 
-        // 3D Silent bullet trajectory steering (Aim Silent from pewpew & STORM_MODS)
-        if (cfg::aim::silent) {
+        // 3D Silent bullet trajectory steering (Aim Silent & Aimbot Trajectory)
+        if (cfg::aim::silent || cfg::aim::enable) {
             apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
         } else {
             silent::clear_silent_data();
         }
 
-        // Real Camera Aim Rotation Assist (AimBot / AimHard from STORM_MODS)
+        // Camera rotation write is permanently neutralized for anti-ban safety
         if (cfg::aim::enable) {
             apply_camera_aim(localPlayer, acq.target, lockToHead, acq.isFiring || acq.triggerActive);
         }
