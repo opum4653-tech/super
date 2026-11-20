@@ -42,7 +42,7 @@ namespace silent {
         }
 
         // Verify target is alive
-        if (target.curHP <= 0 || target.isDead) {
+        if (target.curHP <= 0) {
             return;
         }
 

@@ -84,9 +84,9 @@ namespace aimbot {
 
         TargetAcquisitionResult acq = acquire_target(localPlayer);
         // Instant Death / Target Lost Reversion:
-        // The microsecond the target dies (curHP <= 0 or isDead) or leaves FOV, immediately
+        // The microsecond the target dies (curHP <= 0) or leaves FOV, immediately
         // clear write buffers so game memory instantly returns to 100% natural state.
-        if (!acq.valid || acq.target.curHP <= 0 || acq.target.isDead) {
+        if (!acq.valid || acq.target.curHP <= 0) {
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
             silent::clear_silent_data();
