@@ -31,6 +31,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
+#include <cstdint>
 #include <unistd.h>
 
 extern float g_sw;

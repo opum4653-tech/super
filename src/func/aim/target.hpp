@@ -48,10 +48,11 @@ namespace aimbot {
         }
 
         // FIRING & SCOPING STATE
+        // maxff.h confirms isFiring == 0x850 and IsFiring_Alt aliases the same
+        // address. The old second read was a redundant syscall, not a fallback;
+        // removed rather than guessing at 0x848 (an unnamed bool backing field
+        // in ninmods_real_offsets.h that could trigger aim spuriously).
         bool isFiring = rpm<bool>(localPlayer + Offsets::Player::IsFiring);
-        if (!isFiring) {
-            isFiring = rpm<bool>(localPlayer + 0x850);
-        }
         result.isFiring = isFiring;
 
         // FollowCamera is at localPlayer + Offsets::Player::Camera (0x698 in Free Fire Max). FOVOffset is at 0x84.
@@ -165,8 +166,14 @@ namespace aimbot {
                 if (fovLimit > 0.0f && crosshairDist > fovLimit) continue;
 
                 float score = crosshairDist;
-                if (cfg::aim::priority_mode == 1) { // Lowest HP
-                    score = (float)enemy.curHP;
+                if (cfg::aim::priority_mode == 1) { // Lowest HP, distance-aware
+                    // Pure HP scoring could lock a 1-HP enemy on the far edge of
+                    // the FOV while a healthy enemy sat under the crosshair.
+                    // Add a bounded screen-distance penalty (max 50 HP-units)
+                    // so low HP still wins, but not across the whole FOV.
+                    float fovNorm = (fovLimit > 0.0f) ? (crosshairDist / fovLimit) : 0.0f;
+                    if (fovNorm > 1.0f) fovNorm = 1.0f;
+                    score = (float)enemy.curHP + fovNorm * 50.0f;
                 } else if (cfg::aim::priority_mode == 2) { // 3D Distance
                     score = enemy.distance;
                 }

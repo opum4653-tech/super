@@ -53,6 +53,11 @@ namespace data {
     static std::unordered_map<uint64_t, int>  g_visCounter;
     static std::unordered_map<uint64_t, bool> g_visStable;
 
+    // Consecutive camera-resolution failures. A single bad read is tolerated to
+    // avoid ESP flicker; sustained failure clears projections instead of aiming
+    // with last frame's (stale) camera matrix.
+    static int s_matrixFailCount = 0;
+
     // ------------------------------------------------------------------------
     // CAMERA MATRIX INTEGRITY VALIDATION (Cross-referenced from pewpew)
     // ------------------------------------------------------------------------
@@ -399,7 +404,20 @@ namespace data {
             }
         }
 
-        if (!matrix_resolved && !is_valid_matrix(viewMatrix)) {
+        // Projecting with last frame's matrix puts enemies at stale screen
+        // positions, which makes the aim steer behind moving targets ("drag").
+        // Tolerate up to 3 transient read failures, then drop the snapshot.
+        if (!matrix_resolved) {
+            if (++s_matrixFailCount > 3) {
+                std::lock_guard<std::mutex> lk(players_mutex);
+                players.clear();
+                return;
+            }
+        } else {
+            s_matrixFailCount = 0;
+        }
+        if (!is_valid_matrix(viewMatrix)) {
+            s_matrixFailCount = 0;
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
@@ -517,7 +535,19 @@ namespace data {
                 : (headWorld - Vector3(0.0f, 0.20f, 0.0f));
 
             float dist = calculate_distance(localPos, headWorld);
-            if (dist < 0.8f || dist > cfg::esp::max_range) continue;
+            // One scraper serves both ESP and aim. Gating on cfg::esp::max_range
+            // alone silently capped aim at the ESP slider value: a 50 m ESP range
+            // disabled aim at 150 m. Widen the scrape when aim is active.
+            float scrapeRange = cfg::esp::max_range;
+            if (cfg::aim::enable || cfg::aim::silent) {
+                float aimRange = cfg::aim::max_distance;
+                if (aimRange > 0.0f) {
+                    if (aimRange > scrapeRange) scrapeRange = aimRange;
+                } else {
+                    scrapeRange = 500.0f; // aim max_distance == 0 means unlimited
+                }
+            }
+            if (dist < 0.8f || dist > scrapeRange) continue;
 
             // 2D Screen Projections
             Vector3 headScreen = WorldToScreenPoint(viewMatrix, headWorld);

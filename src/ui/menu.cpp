@@ -708,10 +708,21 @@ namespace ui::menu {
                     ImGui::TextDisabled("AimFov (0 - 180)");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##AimMaxDist", &cfg::aim::max_distance, 0.0f, 500.0f, "%.0f m");
+                    ImGui::TextDisabled("Max Target Distance (0 = Unlimited)");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* triggerModes[] = { "When Firing", "Always In FOV" };
                     ImGui::SetNextItemWidth(-1);
                     ImGui::Combo("##AimTrigger", &cfg::aim::trigger_mode, triggerModes, 2);
                     ImGui::TextDisabled("Aim Trigger Condition");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    const char* priorityModes[] = { "Crosshair Distance", "Lowest HP", "3D Distance" };
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::Combo("##AimPriority", &cfg::aim::priority_mode, priorityModes, 3);
+                    ImGui::TextDisabled("Target Priority Mode");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* boneTargets[] = { "Head (Auto Drag)", "Neck / Upper Chest", "Pelvis / Body" };

@@ -59,7 +59,7 @@ namespace Offsets {
         constexpr uintptr_t FootTF               = 0x6F0;   // LeftToe ITransformNode (maxff.h lToe)
         constexpr uintptr_t Camera               = 0x698;   // FollowCamera on Player (maxff.h / STORM_MODS)
         constexpr uintptr_t IsFiring             = 0x850;   // isFiring Boolean (maxff.h / STORM_MODS)
-        constexpr uintptr_t IsFiring_Alt         = 0x850;   // Secondary
+        constexpr uintptr_t IsFiring_Alt         = 0x850;   // Secondary (maxff.h: sAim1 == isFiring == 0x850)
         constexpr uintptr_t HP                   = 0x70;    // GetCurHP / PlayerData pointer (maxff.h)
         constexpr uintptr_t Armor                = 0x74;    // Int32
         constexpr uintptr_t IsDead               = 0x7C;    // Player_IsDead Boolean (maxff.h)

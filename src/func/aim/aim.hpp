@@ -93,8 +93,11 @@ namespace aimbot {
             return;
         }
 
-        // Firing Invariant: If not actively firing, keep memory 100% pristine and unwritten
-        if (!acq.isFiring) {
+        // Trigger gate: acq.triggerActive already encodes all three configured
+        // conditions (When Firing / Always In FOV / Scope+Sniper Aim). Gating on
+        // isFiring alone made "Always In FOV" a dead setting — the aim thread
+        // returned before writing any trajectory while the trigger was idle.
+        if (!acq.triggerActive) {
             silent::clear_silent_data();
             return;
         }
@@ -106,19 +109,19 @@ namespace aimbot {
             g_currentTarget.screenPos = acq.bestScreenPos;
         }
 
-        // Headshot evaluation & collider mapping (strictly fire-gated)
-        bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.isFiring);
+        // Headshot evaluation & collider mapping (trigger-gated burst lock)
+        bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.triggerActive);
 
         // 3D Silent bullet trajectory steering (Aim Silent & Aimbot Trajectory)
         if (cfg::aim::silent || cfg::aim::enable) {
-            apply_trajectory(localPlayer, acq.target, lockToHead, acq.isFiring);
+            apply_trajectory(localPlayer, acq.target, lockToHead, acq.triggerActive);
         } else {
             silent::clear_silent_data();
         }
 
         // Camera rotation write is permanently neutralized for anti-ban safety
         if (cfg::aim::enable) {
-            apply_camera_aim(localPlayer, acq.target, lockToHead, acq.isFiring || acq.triggerActive);
+            apply_camera_aim(localPlayer, acq.target, lockToHead, acq.triggerActive);
         }
     }
 

@@ -36,13 +36,17 @@ namespace silent {
     }
 
     // Smooth trajectory steering: synchronized directly with game tick
+    // Applies frame-to-frame interpolation (cfg::aim::smooth) to prevent
+    // micro-jitter on moving targets that causes bullet scatter.
     inline void apply_trajectory(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool isFiring) {
         if (!is_valid_ptr(localPlayer) || !isFiring) {
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
         // Verify target is alive
         if (target.curHP <= 0) {
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
@@ -52,6 +56,7 @@ namespace silent {
             aimInfoWeapon = rpm<uint64_t>(localPlayer + Offsets::Player_AimInfo_Alt);
         }
         if (!is_valid_ptr(aimInfoWeapon)) {
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
@@ -63,11 +68,12 @@ namespace silent {
         }
 
         if (bulletOrigin == Vector3::Zero() || !std::isfinite(bulletOrigin.x)) {
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
         // Target bone selection (100% controllable from menu, zero forced defaults)
-        float headBias = cfg::aim::head_bias; // 0.0f default: zero forced bias
+        float headBias = cfg::aim::head_bias;
         Vector3 target3D;
         if (cfg::aim::target_bone == 1) {
             target3D = target.getTargetWorld(1, headBias); // Neck
@@ -76,11 +82,14 @@ namespace silent {
         } else {
             // Target bone 0: Head
             // Governed strictly by RNG headshot_rate: if roll won or sniper scoped, target Head.
-            // If roll missed or rate is 0%, target Chest/Neck for realistic anti-ban telemetry.
-            target3D = lockToHead ? target.getTargetWorld(0, headBias) : target.getTargetWorld(1, headBias);
+            // If roll missed or rate is 0%, target Chest/Spine (NOT neck) for realistic
+            // anti-ban telemetry and to avoid the "drag" where neck shots miss the head
+            // collider but are too high to register as clean body shots.
+            target3D = lockToHead ? target.getTargetWorld(0, headBias) : target.getTargetWorld(2, headBias);
         }
 
         if (target3D == Vector3::Zero() || !std::isfinite(target3D.x)) {
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
@@ -93,12 +102,42 @@ namespace silent {
 
         Vector3 normDir = SafeNormalize(dir);
         if (!std::isfinite(normDir.x) || normDir == Vector3::Zero()) {
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
+        // Apply smoothing interpolation if configured (cfg::aim::smooth > 0).
+        // Lerp from previous frame's direction toward the new direction by (1 / (smooth+1)).
+        // smooth=0 means hard set (instant). smooth=10 means 1/11 lerp factor = gentle follow.
+        // This eliminates micro-jitter on moving targets that scatters bullets.
+        Vector3 writeDir = normDir;
+        float sm = cfg::aim::smooth;
+        if (sm > 0.0f && s_smoothDir != Vector3::Zero() &&
+            std::isfinite(s_smoothDir.x) && s_smoothDir.sqrMagnitude() > 0.5f) {
+            float lerpFactor = 1.0f / (sm + 1.0f);
+            if (lerpFactor > 1.0f) lerpFactor = 1.0f;
+            if (lerpFactor < 0.02f) lerpFactor = 0.02f;
+            writeDir.x = s_smoothDir.x + (normDir.x - s_smoothDir.x) * lerpFactor;
+            writeDir.y = s_smoothDir.y + (normDir.y - s_smoothDir.y) * lerpFactor;
+            writeDir.z = s_smoothDir.z + (normDir.z - s_smoothDir.z) * lerpFactor;
+            // Re-normalize after lerp to ensure unit length
+            float lenSq = writeDir.x * writeDir.x + writeDir.y * writeDir.y + writeDir.z * writeDir.z;
+            if (lenSq > 1e-6f) {
+                float invLen = 1.0f / sqrtf(lenSq);
+                writeDir.x *= invLen;
+                writeDir.y *= invLen;
+                writeDir.z *= invLen;
+            } else {
+                writeDir = normDir;
+            }
+        }
+
+        // Cache the written direction for next frame's smoothing interpolation
+        s_smoothDir = writeDir;
+
         // Smooth single-pass write on natural game frame tick:
         // No redundant tight loops, no multi-thread mutex contention.
-        wpm<Vector3>(aimInfoWeapon + Offsets::AimInfo_Direction, normDir); // 0x40 (RayDir)
+        wpm<Vector3>(aimInfoWeapon + Offsets::AimInfo_Direction, writeDir); // 0x40 (RayDir)
     }
 
 } // namespace silent
