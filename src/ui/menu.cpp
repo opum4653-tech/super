@@ -693,10 +693,8 @@ namespace ui::menu {
 
                     DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
-                    DrawToggleSwitch("Aim Silent", &cfg::aim::silent, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Aimbot Enable", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Scope Aim (Head Lock)", &cfg::aim::scope_aim, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Sniper Headshot Lock", &cfg::aim::sniper_aim, 48.0f * ui_scale, ui_scale);
+                    // Single aim path: Drag Headshot. "Aim Silent" was removed.
+                    DrawToggleSwitch("Drag Headshot (100% Head)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 
@@ -725,15 +723,8 @@ namespace ui::menu {
                     ImGui::TextDisabled("Target Priority Mode");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    const char* boneTargets[] = { "Head (Auto Drag)", "Neck / Upper Chest", "Pelvis / Body" };
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::Combo("##AimBone", &cfg::aim::target_bone, boneTargets, 3);
-                    ImGui::TextDisabled("Target Aim Bone");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##HeadshotRate", &cfg::aim::headshot_rate, 0.0f, 100.0f, "%.0f%%");
-                    ImGui::TextDisabled("Headshot Rate (0%% - 100%%)");
+                    ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Head Lock: 100%% (always)");
+                    ImGui::TextDisabled("Every bullet is dragged to the head bone.");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);

@@ -21,7 +21,7 @@ namespace aimbot {
     inline void render_fov(ImDrawList* dl) {
 
         if (!cfg::master_enabled) return;
-        if ((!cfg::aim::enable && !cfg::aim::silent) || !cfg::aim::show_fov) return;
+        if (!cfg::aim::enable || !cfg::aim::show_fov) return;
         if (!data::inMatch.load(std::memory_order_relaxed)) return;
 
         float cx = g_sw * 0.5f;

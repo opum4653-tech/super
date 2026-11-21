@@ -1,39 +1,33 @@
 #pragma once
 // ============================================================================
-// AIMBOT ASSIST & TRAJECTORY STEERING WORKER THREAD
+// AIMBOT — SINGLE DRAG HEADSHOT ENGINE
 // ============================================================================
 // Project: crack_master
 //
 // SYSTEM ROLE:
-// Coordinates the full trajectory steering and motion modifier cycle:
-// - Thread Management: Started & stopped by attach_worker in src/main.cpp.
-// - Dynamic Thread Cadence:
-//     * 2ms sleep when actively shooting (for ultra-crisp bullet alignment).
-//     * 10ms sleep when idling (reduces CPU cycles).
-// - Sub-Module Orchestration:
-//     * motion::update()      -> Motion enhancements (air flight & phantom)
-//     * acquire_target()      -> Target scoring, FOV filtering, and hysteresis
-//     * evaluate_headshot()   -> RNG headshot roll & raycast collider redirection
-//     * apply_trajectory()    -> 3D unit trajectory steering into AimingInfo
+// One and only aim path. "Aim Silent" has been removed completely: there is no
+// second toggle, no separate writer thread and no RNG body fallback. When the
+// Aimbot trigger fires, the muzzle-to-head unit vector is written straight into
+// our own weapon's AimInfo.Direction (0x40). Offsets are verified, so every
+// bullet is dragged onto the head collider (100% head connection).
+//
+// ANTI-BAN INVARIANT:
+// We never mutate enemy entity memory and never write camera rotation. Only our
+// own weapon's AimInfo direction is touched, and writes stop the instant the
+// trigger goes idle or the target is lost.
 // ============================================================================
 
 #include "common.hpp"
 #include "target.hpp"
-#include "headshot.hpp"
-#include "silent.hpp"
 #include "fov.hpp"
 #include "motion.hpp"
 
 namespace aimbot {
 
-    // Real Camera Aim Assist (Safe Anti-Ban Zero-Op)
-    // Direct memory mutation of Player::Rotation (0x61C) creates client-side touch desync
-    // and server-side angle snap anomalies. Targeting is strictly and safely handled by
-    // normalized silent trajectory steering (apply_trajectory) without mutating player camera in memory.
-    inline void apply_camera_aim(uint64_t localPlayer, const PlayerData& target, bool lockToHead, bool triggerActive) {
+    // Camera rotation write stays permanently neutralized for anti-ban safety.
+    inline void apply_camera_aim(uint64_t localPlayer, const PlayerData& target, bool triggerActive) {
         (void)localPlayer;
         (void)target;
-        (void)lockToHead;
         (void)triggerActive;
     }
 
@@ -42,98 +36,168 @@ namespace aimbot {
         return s_run;
     }
 
+    // ------------------------------------------------------------------------
+    // DRAG HEADSHOT — the only trajectory writer in the project.
+    // ------------------------------------------------------------------------
+    // Normalized direction from muzzle (AimInfo.StartPosition, 0x4C) to the
+    // enemy head bone. There is deliberately no headshot roll and no chest
+    // fallback: target bone 0 is always the head. cfg::aim::smooth only lerps
+    // the vector between frames; the result is re-normalized so Unity always
+    // receives a unit vector.
+    inline void apply_drag_shot(uint64_t localPlayer, const PlayerData& target, bool triggerActive) {
+        if (!is_valid_ptr(localPlayer) || !triggerActive) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+        if (target.curHP <= 0) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+
+        // Resolve our own weapon AimingInfo (primary / alt alias)
+        uint64_t aimInfo = rpm<uint64_t>(localPlayer + Offsets::Player_AimInfo);
+        if (!is_valid_ptr(aimInfo)) {
+            aimInfo = rpm<uint64_t>(localPlayer + Offsets::Player_AimInfo_Alt);
+        }
+        if (!is_valid_ptr(aimInfo)) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+
+        // Muzzle origin; fall back to our own head bone only if invalid
+        Vector3 origin = rpm<Vector3>(aimInfo + Offsets::AimInfo_StartPosition);
+        if (origin == Vector3::Zero() || !std::isfinite(origin.x)) {
+            uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
+            if (localHead) origin = GetNodePosition(localHead);
+        }
+        if (origin == Vector3::Zero() || !std::isfinite(origin.x)) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+
+        // ALWAYS HEAD. Offset-verified head bone with user head_bias alignment.
+        Vector3 head = target.getHeadAimPoint(cfg::aim::head_bias);
+        if (head == Vector3::Zero() || !std::isfinite(head.x)) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+
+        Vector3 dir = head - origin;
+        if (dir.sqrMagnitude() <= 1e-4f) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+
+        Vector3 unit = SafeNormalize(dir);
+        if (!std::isfinite(unit.x) || unit == Vector3::Zero()) {
+            s_smoothDir = Vector3::Zero();
+            return;
+        }
+
+        Vector3 writeDir = unit;
+        float sm = cfg::aim::smooth;
+        if (sm > 0.0f && s_smoothDir != Vector3::Zero() &&
+            std::isfinite(s_smoothDir.x) && s_smoothDir.sqrMagnitude() > 0.5f) {
+            float k = 1.0f / (sm + 1.0f);
+            if (k < 0.02f) k = 0.02f;
+            if (k > 1.0f) k = 1.0f;
+            writeDir = Vector3(
+                s_smoothDir.x + (unit.x - s_smoothDir.x) * k,
+                s_smoothDir.y + (unit.y - s_smoothDir.y) * k,
+                s_smoothDir.z + (unit.z - s_smoothDir.z) * k);
+            float lenSq = writeDir.sqrMagnitude();
+            if (lenSq > 1e-6f) {
+                float invLen = 1.0f / sqrtf(lenSq);
+                writeDir.x *= invLen;
+                writeDir.y *= invLen;
+                writeDir.z *= invLen;
+            } else {
+                writeDir = unit;
+            }
+        }
+
+        s_smoothDir = writeDir;
+        wpm<Vector3>(aimInfo + Offsets::AimInfo_Direction, writeDir); // 0x40 RayDir
+    }
+
+    // ------------------------------------------------------------------------
+    // AIM TICK
+    // ------------------------------------------------------------------------
+    inline void clear_aim_state() {
+        s_lockedTargetAddr = 0;
+        s_lockTimeoutTicks = 0;
+        s_smoothDir = Vector3::Zero();
+    }
+
     inline void update() {
         if (!cfg::master_enabled) {
             motion::reset();
+            clear_aim_state();
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
             return;
         }
 
-        // Run motion enhancement updates
         motion::update();
 
-        if (!cfg::aim::enable && !cfg::aim::silent) {
-            s_lockedTargetAddr = 0;
-            s_lockTimeoutTicks = 0;
-            s_smoothDir = Vector3::Zero();
+        if (!cfg::aim::enable) {
+            clear_aim_state();
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
-            silent::clear_silent_data();
             return;
         }
 
         if (!data::inMatch.load(std::memory_order_relaxed)) {
-            s_lockedTargetAddr = 0;
-            s_lockTimeoutTicks = 0;
+            clear_aim_state();
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
-            silent::clear_silent_data();
             return;
         }
 
         uint64_t localPlayer = data::localPlayerAddr.load(std::memory_order_relaxed);
         if (!is_valid_ptr(localPlayer)) {
-            s_lockedTargetAddr = 0;
-            s_lockTimeoutTicks = 0;
+            clear_aim_state();
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
-            silent::clear_silent_data();
             return;
         }
 
         TargetAcquisitionResult acq = acquire_target(localPlayer);
-        // Instant Death / Target Lost Reversion:
-        // The microsecond the target dies (curHP <= 0) or leaves FOV, immediately
-        // clear write buffers so game memory instantly returns to 100% natural state.
         if (!acq.valid || acq.target.curHP <= 0) {
+            s_smoothDir = Vector3::Zero();
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = false;
-            silent::clear_silent_data();
             return;
         }
 
-        // Trigger gate: acq.triggerActive already encodes all three configured
-        // conditions (When Firing / Always In FOV / Scope+Sniper Aim). Gating on
-        // isFiring alone made "Always In FOV" a dead setting — the aim thread
-        // returned before writing any trajectory while the trigger was idle.
+        // triggerActive encodes When Firing / Always In FOV (scope modes removed).
         if (!acq.triggerActive) {
-            silent::clear_silent_data();
+            s_smoothDir = Vector3::Zero();
             return;
         }
 
-        // Target screen position tracking (thread-safe snapshot for FOV ring)
         {
             std::lock_guard<std::mutex> lk(g_targetMutex);
             g_currentTarget.valid = true;
             g_currentTarget.screenPos = acq.bestScreenPos;
         }
 
-        // Headshot evaluation & collider mapping (trigger-gated burst lock)
-        bool lockToHead = evaluate_headshot(acq.target, acq.isScoping, acq.triggerActive);
+        // Single head-lock trajectory write.
+        apply_drag_shot(localPlayer, acq.target, acq.triggerActive);
 
-        // 3D Silent bullet trajectory steering (Aim Silent & Aimbot Trajectory)
-        if (cfg::aim::silent || cfg::aim::enable) {
-            apply_trajectory(localPlayer, acq.target, lockToHead, acq.triggerActive);
-        } else {
-            silent::clear_silent_data();
-        }
-
-        // Camera rotation write is permanently neutralized for anti-ban safety
-        if (cfg::aim::enable) {
-            apply_camera_aim(localPlayer, acq.target, lockToHead, acq.triggerActive);
-        }
+        // No-op by design; kept as the explicit anti-ban boundary.
+        apply_camera_aim(localPlayer, acq.target, acq.triggerActive);
     }
 
     inline void loop() {
         while (aim_thread_running().load(std::memory_order_relaxed)) {
-            if (cfg::master_enabled && (cfg::aim::enable || cfg::aim::silent)) {
+            if (cfg::master_enabled && cfg::aim::enable) {
                 update();
             } else {
-                silent::clear_silent_data();
+                s_smoothDir = Vector3::Zero();
             }
 
-            // Natural game frame cadence (~60 FPS steady update, zero artificial millisecond forcing)
+            // Natural game frame cadence, no forced microsecond pacing.
             int interval = cfg::aim::read_interval_ms;
             int sleepMs = (interval >= 8 && interval <= 33) ? interval : 16;
             std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
@@ -142,14 +206,13 @@ namespace aimbot {
 
     inline void thread_start() {
         if (aim_thread_running().exchange(true)) return;
-        silent::thread_start();
         std::thread(loop).detach();
     }
 
     inline void thread_stop() {
         aim_thread_running().store(false);
-        silent::thread_stop();
         motion::reset();
+        s_smoothDir = Vector3::Zero();
         std::lock_guard<std::mutex> lk(g_targetMutex);
         g_currentTarget.valid = false;
     }

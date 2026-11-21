@@ -115,7 +115,8 @@ namespace data {
     // Index 1 (+0x28): MaxHP (ReplicationData*)
     // Index 4 (+0x40): CurAP (ReplicationData*, Armor Points)
     // Value is stored at +0x18 (Offsets::HP_Value) inside each ReplicationData.
-    static void readHealthAndArmor(uint64_t pool, int& curHP, int& maxHP, int& curArmor) {
+    static void readHealthAndArmor(uint64_t pool, int& curHP, int& maxHP, int& curArmor,
+                                   bool wantArmor = true) {
         curHP = 0;
         maxHP = 0;
         curArmor = 0;
@@ -138,10 +139,13 @@ namespace data {
         if (maxHP < curHP) maxHP = curHP;
         if (maxHP <= 0) maxHP = (curHP > 0 ? curHP : 200);
 
-        // 3. Live Armor Points (Index 4 at 0x40 if registered)
-        auto elem4 = rpm<uint64_t>(datas + 0x40);
-        if (elem4 && elem4 > 0x10000) {
-            curArmor = rpm<int>(elem4 + Offsets::HP_Value);
+        // 3. Live Armor Points (Index 4 at 0x40) — skip entirely when the
+        //    armor bar is off; this is 2 syscalls per enemy per tick.
+        if (wantArmor) {
+            auto elem4 = rpm<uint64_t>(datas + 0x40);
+            if (elem4 && elem4 > 0x10000) {
+                curArmor = rpm<int>(elem4 + Offsets::HP_Value);
+            }
         }
     }
 
@@ -451,6 +455,17 @@ namespace data {
             return;
         }
 
+        // Resolve which per-entity queries are actually needed this tick.
+        // Every one of these used to run for every enemy on every frame even
+        // when the corresponding overlay element was switched off.
+        const bool wantName    = cfg::esp::name;
+        const bool wantWeapon  = cfg::esp::weapon;
+        const bool wantArmor   = cfg::esp::armor;
+        const bool wantToe     = cfg::esp::box || cfg::esp::health || cfg::esp::armor ||
+                                 cfg::esp::name || cfg::esp::distance || cfg::esp::weapon ||
+                                 cfg::esp::tracer || cfg::esp::firing_ind || cfg::esp::bot_tag;
+        const bool wantKnocked = cfg::esp::box; // aim no longer scores knocked state
+
         int nv = dict.getNumValues();
         MonoDictionary::EntryBlock blk{};
         for (int i = 0; i < nv; i++) {
@@ -467,7 +482,9 @@ namespace data {
             bool isBot = span.at<bool>(Offsets::Player_IsBot);
 
             int curHP = 0, maxHP = 0, curArmor = 0;
-            readHealthAndArmor(span.at<uint64_t>(Offsets::Player_HP), curHP, maxHP, curArmor);
+            // HP is needed for aim validity; armor only when the armor bar is on.
+            readHealthAndArmor(span.at<uint64_t>(Offsets::Player_HP), curHP, maxHP,
+                               curArmor, wantArmor);
             if (curHP <= 0) {
                 curHP = 200;
                 maxHP = 200;
@@ -518,28 +535,17 @@ namespace data {
             if (!std::isfinite(headWorld.x) || !std::isfinite(headWorld.y) || !std::isfinite(headWorld.z)) continue;
             if (headWorld.y < -150.0f || headWorld.y > 600.0f) continue;
 
-            // Hip 3D World Position (used for STORM_MODS chest & body targeting math)
-            uint64_t hipNode = span.at<uint64_t>(Offsets::Bone_Hip);
-            Vector3 hipWorld = Vector3::Zero();
-            if (hipNode) hipWorld = GetNodePosition(hipNode);
-
-            // Spine 3D World Position & Interpolated Neck World Position (pewpew pattern)
-            uint64_t spineNode = span.at<uint64_t>(Offsets::Bone::Breast);
-            Vector3 spineWorld = Vector3::Zero();
-            if (spineNode) spineWorld = GetNodePosition(spineNode);
-            if (spineWorld == Vector3::Zero() || !std::isfinite(spineWorld.x)) {
-                spineWorld = (hipWorld != Vector3::Zero()) ? hipWorld : headWorld;
-            }
-            Vector3 neckWorld = (spineWorld != headWorld)
-                ? (headWorld + (spineWorld - headWorld) * 0.35f)
-                : (headWorld - Vector3(0.0f, 0.20f, 0.0f));
+            // Hip/spine/neck bone walks REMOVED. Each GetNodePosition() walks the
+            // Unity transform hierarchy with many syscalls; those bones only fed
+            // the old chest/neck target modes and the deleted headshot RNG.
+            // The drag shot is head-only, so reading them was pure query waste.
 
             float dist = calculate_distance(localPos, headWorld);
             // One scraper serves both ESP and aim. Gating on cfg::esp::max_range
             // alone silently capped aim at the ESP slider value: a 50 m ESP range
             // disabled aim at 150 m. Widen the scrape when aim is active.
             float scrapeRange = cfg::esp::max_range;
-            if (cfg::aim::enable || cfg::aim::silent) {
+            if (cfg::aim::enable) {
                 float aimRange = cfg::aim::max_distance;
                 if (aimRange > 0.0f) {
                     if (aimRange > scrapeRange) scrapeRange = aimRange;
@@ -553,54 +559,51 @@ namespace data {
             Vector3 headScreen = WorldToScreenPoint(viewMatrix, headWorld);
             if (headScreen.z < 0.001f) continue;
 
-            uint64_t toeNode = span.at<uint64_t>(Offsets::Bone_LeftToe);
-            Vector3 toeScreen = toeNode ? boneScreen(toeNode) : Vector3::Zero();
-            if (toeScreen.z < 0.001f || toeScreen == Vector3::Zero()) {
-                Vector3 toeWorld = headWorld;
-                toeWorld.y -= 1.8f;
-                toeScreen = WorldToScreenPoint(viewMatrix, toeWorld);
-                if (toeScreen.z < 0.001f) {
-                    // Last resort: the toe point itself is behind the near plane
-                    // (enemy extremely close). Scale a 1.8 m body height through
-                    // the actual projection instead of guessing.
-                    //
-                    // W2S maps a world dy to -cy * m22 * dy / w, where w is the
-                    // clip-w that headScreen.z already holds. The previous
-                    // formula used Euclidean distance from the local player and
-                    // a magic 1.2f divisor, which ignored both the camera's
-                    // vertical scale and the true camera-space depth.
-                    float w = headScreen.z;
-                    if (w < 0.1f) w = 0.1f;
-                    float heightPx = (g_sh * 0.5f) * fabsf(viewMatrix.m22) * 1.8f / w;
-                    if (!std::isfinite(heightPx) || heightPx <= 0.0f) heightPx = 4.0f;
-                    if (heightPx > g_sh) heightPx = g_sh; // clamp absurd close-range values
-                    toeScreen = Vector3(headScreen.x, headScreen.y + heightPx, headScreen.z);
+            // Toe is only used to size ESP boxes. The drag shot is head-only,
+            // so in pure-aim mode this entire transform walk is skipped.
+            Vector3 toeScreen = Vector3::Zero();
+            if (wantToe) {
+                uint64_t toeNode = span.at<uint64_t>(Offsets::Bone_LeftToe);
+                toeScreen = toeNode ? boneScreen(toeNode) : Vector3::Zero();
+                if (toeScreen.z < 0.001f || toeScreen == Vector3::Zero()) {
+                    Vector3 toeWorld = headWorld;
+                    toeWorld.y -= 1.8f;
+                    toeScreen = WorldToScreenPoint(viewMatrix, toeWorld);
+                    if (toeScreen.z < 0.001f) {
+                        // Last resort: W2S maps world dy to -cy * m22 * dy / w.
+                        float w = headScreen.z;
+                        if (w < 0.1f) w = 0.1f;
+                        float heightPx = (g_sh * 0.5f) * fabsf(viewMatrix.m22) * 1.8f / w;
+                        if (!std::isfinite(heightPx) || heightPx <= 0.0f) heightPx = 4.0f;
+                        if (heightPx > g_sh) heightPx = g_sh;
+                        toeScreen = Vector3(headScreen.x, headScreen.y + heightPx, headScreen.z);
+                    }
                 }
             }
 
-            // Knocked / Downed state detection (PhyXData 0x1D60 -> MaybeDead 0x20 -> IsKnocked 0x10 == 8)
+            // Knocked / Downed state (PhyXData -> MaybeDead -> IsKnocked).
+            // Two syscalls per enemy; only the ESP box recolors knocked players.
             bool isKnocked = false;
-            uint64_t phyx = rpm<uint64_t>(enemy + Offsets::Player::PhyXData);
-            if (phyx) {
-                uint64_t md = rpm<uint64_t>(phyx + Offsets::Player::PhyX_MaybeDead);
-                if (md && rpm<int>(md + Offsets::Player::PhyX_IsKnocked) == 8) {
-                    isKnocked = true;
+            if (wantKnocked) {
+                uint64_t phyx = rpm<uint64_t>(enemy + Offsets::Player::PhyXData);
+                if (phyx) {
+                    uint64_t md = rpm<uint64_t>(phyx + Offsets::Player::PhyX_MaybeDead);
+                    if (md && rpm<int>(md + Offsets::Player::PhyX_IsKnocked) == 8) {
+                        isKnocked = true;
+                    }
                 }
             }
 
             // Build synchronized PlayerData entity snapshot
             PlayerData pd;
-            readName(span, pd.name, sizeof(pd.name));
-            pd.weaponType = readWeapon(span);
+            if (wantName)   readName(span, pd.name, sizeof(pd.name));
+            if (wantWeapon) pd.weaponType = readWeapon(span);
             if (!pd.name[0] && isBot) snprintf(pd.name, sizeof(pd.name), "BOT");
 
             pd.addr       = enemy;
             pd.Head       = headScreen;
             pd.Toe        = toeScreen;
             pd.headWorld  = headWorld;
-            pd.hipWorld   = hipWorld;
-            pd.spineWorld = spineWorld;
-            pd.neckWorld  = neckWorld;
             pd.isVisible  = visible;
             pd.isBot      = isBot;
             pd.isKnocked  = isKnocked;
@@ -636,7 +639,11 @@ namespace data {
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             update();
-            int iv = cfg::aim::read_interval_ms;
+
+            // Aim needs fresh heads at 60 Hz. Pure ESP only needs ~20 Hz:
+            // re-scraping 32 entities at 60 Hz was the largest query source.
+            const bool aimActive = cfg::master_enabled && cfg::aim::enable;
+            int iv = aimActive ? cfg::aim::read_interval_ms : cfg::aim::esp_interval_ms;
             if (iv < 8) iv = 8;
             if (iv > 100) iv = 100;
 
@@ -644,7 +651,7 @@ namespace data {
             if (!inMatch.load(std::memory_order_relaxed)) {
                 iv = 100;
             } else {
-                // Anti-detection timing jitter: +/- 2ms non-periodic cadence to foil frequency analyzers
+                // Anti-detection timing jitter: +/- 2ms non-periodic cadence.
                 static uint32_t s_jitterRng = 0x12345678;
                 s_jitterRng = s_jitterRng * 1103515245 + 12345;
                 iv += static_cast<int>((s_jitterRng % 5) - 2);

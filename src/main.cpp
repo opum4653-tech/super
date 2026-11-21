@@ -14,7 +14,7 @@
 // - game/data.hpp             -> Entity dictionary scraper thread & world-to-screen matrix sync
 // - game/Offsets.h            -> Centralized memory offset dictionary (OB55 / 1.132.1)
 // - func/esp.hpp              -> Visual ESP render pipeline (Boxes, Tracers, Info, Health bars)
-// - func/aim/aim.hpp          -> Trajectory steering assist & motion enhancement thread
+// - func/aim/aim.hpp          -> Single drag-headshot trajectory writer & motion enhancement thread
 // ============================================================================
 
 #include "Android_draw/draw.h"

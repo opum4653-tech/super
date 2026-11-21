@@ -27,7 +27,6 @@ namespace aimbot {
     struct TargetAcquisitionResult {
         PlayerData target;                      // Selected enemy entity snapshot
         Vector3 bestScreenPos = Vector3::Zero();// 2D screen coordinate of lock point
-        bool isScoping = false;                 // True if local player is aiming down sights
         bool isFiring = false;                  // True if local player is shooting weapon
         bool triggerActive = false;             // True if aim assist should be actively engaged
         bool valid = false;                     // True if a qualified target was successfully acquired
@@ -47,40 +46,18 @@ namespace aimbot {
             return result;
         }
 
-        // FIRING & SCOPING STATE
-        // maxff.h confirms isFiring == 0x850 and IsFiring_Alt aliases the same
-        // address. The old second read was a redundant syscall, not a fallback;
-        // removed rather than guessing at 0x848 (an unnamed bool backing field
-        // in ninmods_real_offsets.h that could trigger aim spuriously).
+        // FIRING STATE — the only trigger input we still read.
+        // maxff.h confirms isFiring == 0x850. The old duplicate read and the
+        // whole camera-FOV scoping chain were queries used only by the deleted
+        // Aim Silent / sniper-lock paths; removed to cut per-tick syscalls.
         bool isFiring = rpm<bool>(localPlayer + Offsets::Player::IsFiring);
         result.isFiring = isFiring;
-
-        // FollowCamera is at localPlayer + Offsets::Player::Camera (0x698 in Free Fire Max). FOVOffset is at 0x84.
-        // When scoping (especially sniper rifles like AWM, Kar98, M82B), FOVOffset shifts negative.
-        uint64_t followCam = rpm<uint64_t>(localPlayer + Offsets::Player::Camera);
-        float camFovOffset = 0.0f;
-        if (is_valid_ptr(followCam)) {
-            camFovOffset = rpm<float>(followCam + Offsets::Player::FOVOffset);
-        }
-        bool isScoping = (camFovOffset < -0.5f || camFovOffset > 0.5f);
-
-        // Weapon IsSight (0x8A0) cross-check from STORM_MODS
-        if (!isScoping) {
-            uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player::Weapon);
-            if (is_valid_ptr(weapon)) {
-                uint64_t sightPtr = rpm<uint64_t>(weapon + Offsets::Weapon::IsSight);
-                if (sightPtr != 0) isScoping = true;
-            }
-        }
-        result.isScoping = isScoping;
 
         bool triggerActive = false;
         if (cfg::aim::trigger_mode == 1) {
             triggerActive = true; // Always In FOV
-        } else if ((cfg::aim::scope_aim || cfg::aim::sniper_aim) && result.isScoping) {
-            triggerActive = true; // Instant activation when scoping
         } else {
-            triggerActive = isFiring;
+            triggerActive = isFiring; // When Firing
         }
         result.triggerActive = triggerActive;
 
@@ -121,17 +98,12 @@ namespace aimbot {
                         enemy.distance > cfg::aim::max_distance) lockAllowed = false;
 
                     if (lockAllowed) {
+                        // Head-only: the drag shot always steers into the head,
+                        // so score strictly on head distance. No Toe dependency.
                         float dxHead = enemy.Head.x - screenCx;
                         float dyHead = enemy.Head.y - screenCy;
-                        float distHead = sqrtf(dxHead * dxHead + dyHead * dyHead);
+                        float dist = sqrtf(dxHead * dxHead + dyHead * dyHead);
 
-                        float bodyX = (enemy.Head.x + enemy.Toe.x) * 0.5f;
-                        float bodyY = (enemy.Head.y + enemy.Toe.y) * 0.5f;
-                        float dxBody = bodyX - screenCx;
-                        float dyBody = bodyY - screenCy;
-                        float distBody = sqrtf(dxBody * dxBody + dyBody * dyBody);
-
-                        float dist = std::min(distHead, distBody);
                         if (fovLimit <= 0.0f || dist <= fovLimit * 1.35f) {
                             result.target = enemy;
                             result.bestScreenPos = enemy.Head;
@@ -162,17 +134,10 @@ namespace aimbot {
                 if (!enemy.isVisible) continue;
                 if (cfg::aim::max_distance > 0.0f && enemy.distance > cfg::aim::max_distance) continue;
 
+                // Head-only scoring matches the 100% head drag shot.
                 float dxHead = enemy.Head.x - screenCx;
                 float dyHead = enemy.Head.y - screenCy;
-                float distHead = sqrtf(dxHead * dxHead + dyHead * dyHead);
-
-                float bodyX = (enemy.Head.x + enemy.Toe.x) * 0.5f;
-                float bodyY = (enemy.Head.y + enemy.Toe.y) * 0.5f;
-                float dxBody = bodyX - screenCx;
-                float dyBody = bodyY - screenCy;
-                float distBody = sqrtf(dxBody * dxBody + dyBody * dyBody);
-
-                float crosshairDist = std::min(distHead, distBody);
+                float crosshairDist = sqrtf(dxHead * dxHead + dyHead * dyHead);
                 if (fovLimit > 0.0f && crosshairDist > fovLimit) continue;
 
                 float score = crosshairDist;

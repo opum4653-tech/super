@@ -59,24 +59,19 @@ namespace esp {
 }
 
 namespace aim {
-    inline int   read_interval_ms = 16;   // Read loop cadence (ms). Higher = lower syscall frequency.
-    inline bool  enable           = false; // Traditional Aim Assist
-    inline bool  silent           = false; // Aim Silent: direct ray trajectory steering, zero camera movement
-    inline bool  scope_aim        = false; // Off by default. Enabling adds a write path on scope.
-    inline bool  sniper_aim       = false; // Off by default. Enabling forces head lock, ignoring headshot_rate.
+    inline int   read_interval_ms = 16;   // Aimbot tick (ms). 16 = natural 60 Hz frame cadence.
+    // ESP-only reader cadence. When no aim mode is active there is no reason to
+    // re-scrape every entity at 60 Hz: overlay boxes only need ~20 Hz to look
+    // smooth. This is the single biggest syscall reduction in the project.
+    inline int   esp_interval_ms  = 50;
+    inline bool  enable           = false; // One and only aim path: drag headshot.
     inline bool  show_fov         = false;
     inline float aim_fov          = 0.0f;   // 0.0f default: fully controlled from menu slider
     inline float fov_radius       = 0.0f;   // 0.0f default
     inline float smooth           = 0.0f;   // 0.0f default: fully controlled from menu slider
-    // Headshot roll default. This was 0.0f, which made every shot a deliberate
-    // body shot out of the box: evaluate_headshot() returns false for rate <= 0,
-    // so silent.hpp steered to chest on 100% of bullets. Because this project has
-    // no config persistence, that default was re-applied on every single launch
-    // and the slider had to be dragged manually each time. 75% is the shipped
-    // baseline and remains fully user-adjustable from the menu.
-    inline float headshot_rate    = 75.0f;
+    // Target bone is intentionally not configurable. We always steer into the
+    // head — there is no headshot roll and no body fallback: 100% head lock.
     inline float head_bias        = 0.0f;   // 0.0f default: zero forced bias
-    inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
     inline bool  ignore_bots      = false;
@@ -87,9 +82,9 @@ namespace aim {
     // A return value of 0 is interpreted by target.hpp as "no limit": the
     // hysteresis check `fovLimit <= 0.0f` passes unconditionally and the
     // acquisition check `fovLimit > 0.0f && ...` never filters. With both
-    // aim_fov and fov_radius at their 0 defaults that meant aim silently
-    // locked onto any visible enemy anywhere on screen — including one at the
-    // far edge — and trajectory steering redirected bullets at extreme angles.
+    // aim_fov and fov_radius at their 0 defaults that meant aim would lock
+    // onto any visible enemy anywhere on screen — including one at the far
+    // edge — and drag bullets at extreme angles.
     // Fall back to a sane pixel radius instead of "unlimited".
     inline float get_fov_radius() {
         if (aim_fov > 0.0f && g_sw > 0.0f) {
@@ -111,7 +106,7 @@ namespace motion {
 
 inline bool any_feature_enabled() {
     if (!master_enabled) return false;
-    return aim::enable || aim::silent || esp::box || esp::health || esp::armor ||
+    return aim::enable || esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair || esp::firing_ind ||
            motion::air_flight || motion::phantom_mode;

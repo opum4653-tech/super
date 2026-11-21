@@ -7,8 +7,7 @@
 // SYSTEM ROLE:
 // Shared foundation header for all sub-modules of the aim suite:
 // - target.hpp   (Acquisition & scoring)
-// - headshot.hpp (Collider override & percentage roll)
-// - silent.hpp   (3D trajectory unit vector calculation)
+// - aim.hpp      (Single head-only drag-shot trajectory writer)
 // - fov.hpp      (Screen FOV circle & target ring rendering)
 // - motion.hpp   (Air flight & phantom mode modifiers)
 // ============================================================================
