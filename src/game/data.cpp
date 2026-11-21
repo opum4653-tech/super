@@ -560,8 +560,21 @@ namespace data {
                 toeWorld.y -= 1.8f;
                 toeScreen = WorldToScreenPoint(viewMatrix, toeWorld);
                 if (toeScreen.z < 0.001f) {
-                    float estimatedHeight = (g_sh * 1.8f) / std::max(1.0f, dist * 1.2f);
-                    toeScreen = Vector3(headScreen.x, headScreen.y + estimatedHeight, headScreen.z);
+                    // Last resort: the toe point itself is behind the near plane
+                    // (enemy extremely close). Scale a 1.8 m body height through
+                    // the actual projection instead of guessing.
+                    //
+                    // W2S maps a world dy to -cy * m22 * dy / w, where w is the
+                    // clip-w that headScreen.z already holds. The previous
+                    // formula used Euclidean distance from the local player and
+                    // a magic 1.2f divisor, which ignored both the camera's
+                    // vertical scale and the true camera-space depth.
+                    float w = headScreen.z;
+                    if (w < 0.1f) w = 0.1f;
+                    float heightPx = (g_sh * 0.5f) * fabsf(viewMatrix.m22) * 1.8f / w;
+                    if (!std::isfinite(heightPx) || heightPx <= 0.0f) heightPx = 4.0f;
+                    if (heightPx > g_sh) heightPx = g_sh; // clamp absurd close-range values
+                    toeScreen = Vector3(headScreen.x, headScreen.y + heightPx, headScreen.z);
                 }
             }
 

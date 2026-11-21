@@ -34,6 +34,15 @@ namespace aimbot {
     inline uint64_t s_lockTargetForRng = 0;      // Target address this roll belongs to
     inline int64_t  s_lastFiringTimeMs = 0;      // Last time isFiring was true (ms)
     inline bool    s_lastFiringState   = false;  // Previous frame's firing state
+    inline int64_t  s_burstStartMs     = 0;      // When the current burst's roll was drawn
+
+    // Hard cap on how long a single roll may govern a target.
+    // Without this, "Always In FOV" (trigger_mode == 1) keeps the trigger active
+    // on every tick, so the >200 ms gap never elapses and the first roll for an
+    // enemy is reused forever: that enemy is then either always-headshot or
+    // always-body-shot for the whole match. The user-visible symptom is a
+    // headshot rate that reads far below the configured slider value.
+    static constexpr int64_t kBurstMaxMs = 1200;
 
     // Returns current monotonic time in milliseconds (steady clock, no wall-clock jumps)
     // Plain inline (not static): the aim headers are compiled into more than one
@@ -53,6 +62,7 @@ namespace aimbot {
             s_headshotLock = true;
             s_lockTargetForRng = target.addr;
             s_lastFiringTimeMs = now_ms();
+            s_burstStartMs = s_lastFiringTimeMs;
             s_lastFiringState = isFiring;
             return true;
         }
@@ -62,6 +72,7 @@ namespace aimbot {
             s_headshotLock = false;
             s_lockTargetForRng = target.addr;
             s_lastFiringTimeMs = now_ms();
+            s_burstStartMs = s_lastFiringTimeMs;
             s_lastFiringState = isFiring;
             return false;
         }
@@ -71,13 +82,16 @@ namespace aimbot {
         int64_t curMs = now_ms();
 
         // Burst break: a >200ms gap since the last trigger, a firing->idle
-        // transition, or a different target. evaluate_headshot is only reached
-        // while the trigger is active (including "Always In FOV" mode), so the
-        // timestamp gap is the reliable signal that the player released fire.
+        // transition, a different target, or the kBurstMaxMs ceiling expiring.
+        // evaluate_headshot is only reached while the trigger is active
+        // (including "Always In FOV" mode), so the timestamp gap is the reliable
+        // signal that the player released fire. The hard ceiling is required
+        // because in "Always In FOV" mode the gap never elapses on its own.
         bool burstBroken = false;
         if (curMs - s_lastFiringTimeMs > 200) burstBroken = true;
         if (s_lastFiringState && !isFiring) burstBroken = true;
         if (s_lockTargetForRng != target.addr) burstBroken = true;
+        if (curMs - s_burstStartMs > kBurstMaxMs) burstBroken = true;
 
         s_lastFiringTimeMs = curMs;
         s_lastFiringState = isFiring;
@@ -91,6 +105,7 @@ namespace aimbot {
 
         // New burst or new target: roll the RNG once for this entire burst
         s_lockTargetForRng = target.addr;
+        s_burstStartMs = curMs;
 
         // Independent xorshift RNG roll against user's headshot_rate
         static uint32_t s_rollRng =

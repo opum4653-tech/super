@@ -73,7 +73,19 @@ namespace func::esp {
     }
 
     // GEOMETRIC & STRING FORMATTING
-    inline bool ok(const Vector3& v) { return v.x > 0 && v.y > 0 && v.z > 0.5f; }
+    // A projection is usable when it sits in front of the near plane and is
+    // finite. Screen X/Y are deliberately NOT required to be positive: a head
+    // just off the left or top edge still has a valid projection, and
+    // esp::draw() already applies its own +/-30px off-screen margin cull.
+    //
+    // The old test required z > 0.5f and x,y > 0, which contradicted the
+    // 0.001f near-plane threshold used by data.cpp and esp.hpp: any enemy
+    // closer than ~0.5 clip-w was scraped successfully and offered to the aim
+    // thread, yet silently lost its ESP box here. It also dropped every enemy
+    // standing partly outside the viewport. Both halves now agree.
+    inline bool ok(const Vector3& v) {
+        return v.z > 0.001f && std::isfinite(v.x) && std::isfinite(v.y);
+    }
 
     inline void fmtDist(float d, char* out, size_t n) {
         if (d >= 1000.f) snprintf(out, n, "%.1fkm", d / 1000.f);

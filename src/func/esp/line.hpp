@@ -21,8 +21,10 @@ namespace func::esp {
     inline void drawTracer(ImDrawList* dl, const PlayerData& p, ImU32 colBase) {
         if (!cfg::esp::tracer) return;
 
-        // Strictly draw tracer ONLY when head point is within visible screen bounds
-        if (p.Head.z < 0.5f || p.Head.x < 0.f || p.Head.x > g_sw ||
+        // Strictly draw tracer ONLY when head point is within visible screen bounds.
+        // Near-plane threshold matches data.cpp / esp.hpp (0.001f); the old 0.5f
+        // here suppressed tracers on legitimately close enemies.
+        if (p.Head.z < 0.001f || p.Head.x < 0.f || p.Head.x > g_sw ||
             p.Head.y < 0.f || p.Head.y > g_sh) {
             return;
         }

@@ -110,7 +110,17 @@ namespace aimbot {
         if (s_lockedTargetAddr != 0) {
             for (const auto& enemy : enemies) {
                 if (enemy.addr == s_lockedTargetAddr) {
-                    if (enemy.curHP > 0 && enemy.Head.z >= 0.05f && enemy.isVisible) {
+                    // The lock must obey the same filters as fresh acquisition.
+                    // Previously it only checked HP / depth / visibility, so
+                    // enabling "Ignore AI Bots" or lowering Max Target Distance
+                    // while locked kept steering at a now-excluded enemy until
+                    // it happened to leave the 1.35x grace radius.
+                    bool lockAllowed = enemy.curHP > 0 && enemy.Head.z >= 0.05f && enemy.isVisible;
+                    if (lockAllowed && cfg::aim::ignore_bots && enemy.isBot) lockAllowed = false;
+                    if (lockAllowed && cfg::aim::max_distance > 0.0f &&
+                        enemy.distance > cfg::aim::max_distance) lockAllowed = false;
+
+                    if (lockAllowed) {
                         float dxHead = enemy.Head.x - screenCx;
                         float dyHead = enemy.Head.y - screenCy;
                         float distHead = sqrtf(dxHead * dxHead + dyHead * dyHead);

@@ -68,7 +68,13 @@ namespace aim {
     inline float aim_fov          = 0.0f;   // 0.0f default: fully controlled from menu slider
     inline float fov_radius       = 0.0f;   // 0.0f default
     inline float smooth           = 0.0f;   // 0.0f default: fully controlled from menu slider
-    inline float headshot_rate    = 0.0f;   // 0.0f default: fully controlled from menu slider
+    // Headshot roll default. This was 0.0f, which made every shot a deliberate
+    // body shot out of the box: evaluate_headshot() returns false for rate <= 0,
+    // so silent.hpp steered to chest on 100% of bullets. Because this project has
+    // no config persistence, that default was re-applied on every single launch
+    // and the slider had to be dragged manually each time. 75% is the shipped
+    // baseline and remains fully user-adjustable from the menu.
+    inline float headshot_rate    = 75.0f;
     inline float head_bias        = 0.0f;   // 0.0f default: zero forced bias
     inline int   target_bone      = 0; // 0 = Head, 1 = Neck/Chest, 2 = Pelvis/Body
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
@@ -76,11 +82,24 @@ namespace aim {
     inline bool  ignore_bots      = false;
     inline float max_distance     = 0.0f;  // 0.0f default: fully controlled from menu
 
+    // Resolves the aim acquisition radius in screen pixels.
+    //
+    // A return value of 0 is interpreted by target.hpp as "no limit": the
+    // hysteresis check `fovLimit <= 0.0f` passes unconditionally and the
+    // acquisition check `fovLimit > 0.0f && ...` never filters. With both
+    // aim_fov and fov_radius at their 0 defaults that meant aim silently
+    // locked onto any visible enemy anywhere on screen — including one at the
+    // far edge — and trajectory steering redirected bullets at extreme angles.
+    // Fall back to a sane pixel radius instead of "unlimited".
     inline float get_fov_radius() {
         if (aim_fov > 0.0f && g_sw > 0.0f) {
             return (aim_fov / 180.0f) * (g_sw * 0.55f);
         }
-        return fov_radius;
+        if (fov_radius > 0.0f) {
+            return fov_radius;
+        }
+        // Neither configured: 12% of screen width (~130 px on a 1080-wide view).
+        return (g_sw > 0.0f) ? (g_sw * 0.12f) : 120.0f;
     }
 }
 
