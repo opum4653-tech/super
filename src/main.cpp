@@ -8,7 +8,7 @@
 // - Android_draw/draw.h       -> NativeSurface ANativeWindow creation & EGL context setup
 // - ui/menu.hpp               -> ImGui emerald-green native touch UI menu rendering
 // - protect/license.hpp       -> RAM-only HTTPS key validation & memfd CA security handshake
-// - other/memory.hpp          -> Ring-3 external direct syscall RPM/WPM engine (sys::vm_read/write)
+// - other/memory.hpp          -> KPM (Kernel Patch Module) memory engine (from pewpew)
 // - other/display_manager.hpp -> Zero-fork sysfs/property display metrics cache
 // - other/settings_guard.hpp  -> Android block_untrusted_touches state capture & reverse restore
 // - game/data.hpp             -> Entity dictionary scraper thread & world-to-screen matrix sync
@@ -173,6 +173,9 @@ static int start_overlay() {
     // Initialize virtual digitizer / uinput event injection for touch pass-through
     Touch_Init(displayInfo.width, displayInfo.height, displayInfo.orientation, false);
 
+    // Initialize KPM (from pewpew)
+    kpm.init(true);
+
     // BACKGROUND ATTACH THREAD:
     // Enables overlay GUI & floating logo to appear immediately upon launching,
     // without blocking for target game launch. Once game starts, starts data & aim threads.
@@ -180,6 +183,7 @@ static int start_overlay() {
         while (main_thread_flag) {
             proc::pid = get_pid();
             if (proc::pid > 0) {
+                kpm.initialize(proc::pid);
                 proc::lib = get_lib();
                 if (proc::lib > 0) {
                     // Verify valid ELF magic header in target process (0x7F 'E' 'L' 'F')

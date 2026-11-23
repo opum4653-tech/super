@@ -1,31 +1,22 @@
 #pragma once
 // ============================================================================
-// DIRECT SYSCALL EXTERNAL MEMORY ENGINE & PROCESS RESOLVER
+// KPM MEMORY ENGINE & PROCESS RESOLVER
 // ============================================================================
-// Project: crack_master
+// Project: crack_master (Pure KPM Memory Integration)
+// Sourced from: pewpew (C:\Users\Sajala\Documents\mods\refer\pewpew)
 //
-// ARCHITECTURAL FOUNDATION (ZERO-FOOTPRINT EXTERNAL RPM/WPM):
-// 1. Zero Open File Descriptors:
-//    Unlike legacy memory tools that hold open file descriptors to /proc/<pid>/mem,
-//    this engine issues direct kernel syscalls (SYS_process_vm_readv = 270,
-//    SYS_process_vm_writev = 271 on ARM64). /proc/self/fd/ remains completely clean.
-// 2. Direct Inline Assembly Syscalls (ARM64 svc #0):
-//    Bypasses libc wrappers to eliminate hooked function intercept windows.
-//    Register allocation: x8 = syscall number, x0-x5 = arguments.
-// 3. Volatile Stack Memory Scrubbing (wipe):
-//    Wipes path strings and buffer pages immediately after use to prevent
-//    forensic recovery from core dumps or /proc/self/mem inspection.
-// 4. Jittered PID & Maps Scanning:
-//    Employs dynamic random time jitter (1.8s - 2.7s) during process sweeps
-//    to avoid periodic detection patterns.
+// All external syscall memory methods (process_vm_readv / process_vm_writev)
+// have been removed. All reads and writes are routed exclusively through KPM:
+// - TB KPM:  PRCTL_MEM_READ (0x63687501) / PRCTL_MEM_WRITE (0x63687502)
+// - Neo KPM: NA_PRCTL_MAGIC (0x4E41)
 // ============================================================================
 
 #include <cstdint>
 #include <cstring>
 #include <ctime>
-#include <sys/uio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "kpm.h"
 #include "../protect/oxorany.hpp"
 
 namespace proc {
@@ -43,15 +34,11 @@ namespace sys {
     static constexpr long SYS_close      = 57;
     static constexpr long SYS_read       = 63;
     static constexpr long SYS_getdents64 = 61;
-    static constexpr long SYS_vm_read    = 270;
-    static constexpr long SYS_vm_write   = 271;
     #elif defined(__x86_64__)
     static constexpr long SYS_openat     = 257;
     static constexpr long SYS_close      = 3;
     static constexpr long SYS_read       = 0;
     static constexpr long SYS_getdents64 = 217;
-    static constexpr long SYS_vm_read    = 310;
-    static constexpr long SYS_vm_write   = 311;
     #endif
 
     #ifndef AT_FDCWD
@@ -89,12 +76,6 @@ namespace sys {
     static inline int  close (int fd)                        { return static_cast<int>(sc6(SYS_close, fd, 0, 0, 0, 0, 0)); }
     static inline long read  (int fd, void* b, size_t c)     { return sc6(SYS_read, fd, reinterpret_cast<long>(b), c, 0, 0, 0); }
     static inline long getdents64(int fd, void* d, size_t c) { return sc6(SYS_getdents64, fd, reinterpret_cast<long>(d), c, 0, 0, 0); }
-    static inline long vm_read (int pid, struct iovec* l, unsigned long lc, struct iovec* r, unsigned long rc) {
-        return sc6(SYS_vm_read, pid, reinterpret_cast<long>(l), lc, reinterpret_cast<long>(r), rc, 0);
-    }
-    static inline long vm_write(int pid, struct iovec* l, unsigned long lc, struct iovec* r, unsigned long rc) {
-        return sc6(SYS_vm_write, pid, reinterpret_cast<long>(l), lc, reinterpret_cast<long>(r), rc, 0);
-    }
 }
 
 struct linux_dirent64 {
@@ -105,7 +86,7 @@ struct linux_dirent64 {
     char d_name[];
 };
 
-// Wipe stack buffers depois de usar — nada de path linger em snapshots de memória.
+// Wipe stack buffers after use
 static inline void wipe(void* p, size_t n) {
     volatile uint8_t* v = reinterpret_cast<volatile uint8_t*>(p);
     for (size_t i = 0; i < n; i++) v[i] = 0;
@@ -115,17 +96,22 @@ inline bool is_valid_ptr(uint64_t a) {
     return (a >= 0x10000000ULL && a <= 0x7FFFFFFFFFFFULL);
 }
 
-inline bool addr_valid(uint64_t a) { return is_valid_ptr(a); }
+inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
+
+// ============================================================================
+// KPM MEMORY READ & WRITE (EXCLUSIVE ENGINE)
+// ============================================================================
 
 inline bool mem_read(uint64_t a, void* b, size_t l) {
     if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
-    struct iovec loc[1], rem[1];
-    loc[0].iov_base = b;
-    loc[0].iov_len  = l;
-    rem[0].iov_base = reinterpret_cast<void*>(a);
-    rem[0].iov_len  = l;
-    ssize_t r = sys::vm_read(proc::pid, loc, 1, rem, 1);
-    if (r != static_cast<long>(l)) {
+    if (!kpm.is_active()) {
+        if (!kpm.init(false)) {
+            memset(b, 0, l);
+            return false;
+        }
+    }
+    kpm.initialize(proc::pid);
+    if (!kpm.read(static_cast<uintptr_t>(a), b, l)) {
         memset(b, 0, l);
         return false;
     }
@@ -134,12 +120,11 @@ inline bool mem_read(uint64_t a, void* b, size_t l) {
 
 inline bool mem_write(uint64_t a, const void* b, size_t l) {
     if (proc::pid <= 0 || !is_valid_ptr(a) || l == 0 || b == nullptr) return false;
-    struct iovec loc[1], rem[1];
-    loc[0].iov_base = const_cast<void*>(b);
-    loc[0].iov_len  = l;
-    rem[0].iov_base = reinterpret_cast<void*>(a);
-    rem[0].iov_len  = l;
-    return sys::vm_write(proc::pid, loc, 1, rem, 1) == static_cast<long>(l);
+    if (!kpm.is_active()) {
+        if (!kpm.init(false)) return false;
+    }
+    kpm.initialize(proc::pid);
+    return kpm.write(static_cast<uintptr_t>(a), b, l);
 }
 
 template<typename T> inline T rpm(uint64_t a) {
@@ -152,8 +137,7 @@ template<typename T> inline bool wpm(uint64_t a, const T& d) {
     return mem_write(a, &d, sizeof(T));
 }
 
-// Confirm one cached pid still belongs to the target. One openat + one read,
-// versus a getdents64 sweep of every entry in /proc.
+// Confirm one cached pid still belongs to the target.
 inline bool pid_alive(int pid) {
     if (pid <= 0) return false;
 
@@ -185,24 +169,39 @@ inline bool pid_alive(int pid) {
     bool ok = false;
     if (b > 0) {
         cmd[b] = '\0';
-        ok = (strstr(cmd, oxorany("com.dts.freefiremax")) != nullptr);
+        ok = (strstr(cmd, oxorany("com.dts.freefiremax")) != nullptr ||
+              strstr(cmd, oxorany("com.dts.freefireth"))  != nullptr);
         wipe(cmd, sizeof(cmd));
     }
     return ok;
 }
 
+// ============================================================================
+// TARGET GAME PROCESS DISCOVERY
+// ============================================================================
+
 inline int get_pid() {
-    // Fast path — the previously confirmed target, still alive and still ours.
-    // PID reuse is caught because the name has to match again, not just the number.
+    // Fast path: cached PID is still alive and matches game package
     if (proc::pid_cache > 0 && pid_alive(proc::pid_cache)) {
+        kpm.initialize(proc::pid_cache);
         return proc::pid_cache;
     }
     proc::pid_cache = 0;
 
-    // Cooldown after a failed sweep. Reading every /proc/<pid>/cmdline on a timer
-    // is a signature of its own, and the target is not going to materialise within
-    // a couple of seconds of the last time we looked. The interval drifts so the
-    // scan does not land on a fixed period.
+    // Direct Neo KPM PID query if available (from pewpew)
+    if (kpm.is_active() && kpm.get_type() == KPM_NEO) {
+        pid_t neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefiremax"));
+        if (neo_pid <= 0) {
+            neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefireth"));
+        }
+        if (neo_pid > 0) {
+            proc::pid_cache = neo_pid;
+            kpm.initialize(neo_pid);
+            return neo_pid;
+        }
+    }
+
+    // Cooldown after a failed sweep with jitter (1.8s - 2.7s)
     static long long s_next_scan_ms = 0;
     static unsigned  s_scan_seq     = 0;
     struct timespec ts;
@@ -245,7 +244,7 @@ inline int get_pid() {
                     cp[ps] = '\0';
 
                     int cfd = sys::openat(AT_FDCWD, cp, O_RDONLY);
-                    wipe(cp, sizeof(cp));                       // scrub path
+                    wipe(cp, sizeof(cp));
                     if (cfd >= 0) {
                         char cmd[256] = {0};
                         long b = sys::read(cfd, cmd, sizeof(cmd) - 1);
@@ -253,10 +252,11 @@ inline int get_pid() {
 
                         if (b > 0) {
                             cmd[b] = '\0';
-                            if (strstr(cmd, oxorany("com.dts.freefiremax"))) {
+                            if (strstr(cmd, oxorany("com.dts.freefiremax")) ||
+                                strstr(cmd, oxorany("com.dts.freefireth"))) {
                                 found = pid;
                             }
-                            wipe(cmd, sizeof(cmd));             // scrub cmdline
+                            wipe(cmd, sizeof(cmd));
                         }
                     }
                     if (found > 0) break;
@@ -273,14 +273,20 @@ inline int get_pid() {
 
     if (found > 0) {
         proc::pid_cache = found;
+        kpm.initialize(found);
     } else {
         s_next_scan_ms = now_ms + 1800 + (long long)((s_scan_seq++ * 137u) % 900u);
     }
     return found;
 }
 
+// ============================================================================
+// MODULE BASE RESOLVER (KPM VERIFIED ELF & GAMEFACADE SCANNER)
+// ============================================================================
+
 inline uint64_t get_lib() {
     if (proc::pid <= 0) return 0;
+    kpm.initialize(proc::pid);
 
     char mp[64];
     int ps = 0;
@@ -301,7 +307,13 @@ inline uint64_t get_lib() {
     int mfd = sys::openat(AT_FDCWD, mp, O_RDONLY);
     wipe(mp,  sizeof(mp));
     wipe(pds, sizeof(pds));
-    if (mfd < 0) return 0;
+
+    // Fallback: if openat fails, query module base through KPM maps resolver
+    if (mfd < 0) {
+        uintptr_t base = kpm.parse_maps_module_base(oxorany("libil2cpp.so"));
+        if (base > 0) return static_cast<uint64_t>(base);
+        return 0;
+    }
 
     char buf[8192];
     long tr = 0;
@@ -358,7 +370,7 @@ inline uint64_t get_lib() {
                         if (mt) {
                             if (firstMatch == 0) firstMatch = st;
 
-                            // Verify ELF magic header: 0x7F 'E' 'L' 'F' (0x464C457F)
+                            // Verify ELF magic header via KPM: 0x7F 'E' 'L' 'F' (0x464C457F)
                             uint32_t magic = rpm<uint32_t>(st);
                             if (magic == 0x464C457F) {
                                 if (candCount < 8) {
@@ -388,7 +400,7 @@ inline uint64_t get_lib() {
     sys::close(mfd);
     wipe(buf, sizeof(buf));
 
-    // Forensic candidate validation matching STORM_MODS FindCorrectLibBase()
+    // Candidate validation via KPM:
     // Test if candidate base resolves GameFacade static pointer (> 0x10000000)
     for (int i = 0; i < candCount; i++) {
         uint64_t cand = candidates[i];
@@ -409,6 +421,10 @@ inline uint64_t get_lib() {
     }
 
     // Fallback 2: Return first readable libil2cpp segment
-    return firstMatch;
-}
+    if (firstMatch > 0) {
+        return firstMatch;
+    }
 
+    // Fallback 3: Return base from KPM maps resolver
+    return static_cast<uint64_t>(kpm.parse_maps_module_base(oxorany("libil2cpp.so")));
+}

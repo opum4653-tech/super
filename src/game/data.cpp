@@ -12,7 +12,7 @@
 //    - Candidate 3: BaseGame -> CameraManager (0xD8) -> Camera (0x20/0x28) -> 0x10 -> Matrix (0x100)
 //    Validated by is_valid_matrix() before committing to avoid W2S screen tearing.
 // 3. Syscall Minimization via PlayerSpan:
-//    Reads contiguous span (0x70 to 0x860) in ONE process_vm_readv call instead of 15 individual syscalls.
+//    Reads contiguous span (0x70 to 0x860) in ONE Ring-0 KPM prctl read call instead of 15 individual syscalls.
 // 4. Entity Filtering:
 //    Filters out dead players, teammates (UMAData.isTeammate), and local user.
 // 5. Data Delivery:
@@ -77,7 +77,7 @@ namespace data {
     // ------------------------------------------------------------------------
     // Every field read directly off the player object sits between 0x70 and
     // 0x860 (Player::HP .. Player::IsFiring). Pulling that span in a single
-    // process_vm_readv replaces roughly a dozen syscalls per player per tick
+    // Ring-0 KPM prctl read replaces roughly a dozen memory reads per player per tick
     // with one, which is the point: the read pattern stops looking like a
     // field-by-field scrape of the same object.
     static constexpr size_t kSpanLo = 0x70;    // Offsets::Player::HP
