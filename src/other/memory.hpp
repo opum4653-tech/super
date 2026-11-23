@@ -27,6 +27,19 @@ namespace proc {
     inline int      pid_cache = 0;
 }
 
+#ifdef SYS_openat
+#undef SYS_openat
+#endif
+#ifdef SYS_close
+#undef SYS_close
+#endif
+#ifdef SYS_read
+#undef SYS_read
+#endif
+#ifdef SYS_getdents64
+#undef SYS_getdents64
+#endif
+
 namespace sys {
 
     #if defined(__aarch64__)
@@ -180,16 +193,14 @@ inline int get_pid() {
     proc::pid_cache = 0;
 
     // Direct Neo KPM PID query if available (from pewpew)
-    if (kpm.is_active() && kpm.get_type() == KPM_NEO) {
-        pid_t neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefiremax"));
-        if (neo_pid <= 0) {
-            neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefireth"));
-        }
-        if (neo_pid > 0) {
-            proc::pid_cache = neo_pid;
-            kpm.initialize(neo_pid);
-            return neo_pid;
-        }
+    pid_t neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefiremax"));
+    if (neo_pid <= 0) {
+        neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefireth"));
+    }
+    if (neo_pid > 0) {
+        proc::pid_cache = neo_pid;
+        kpm.initialize(neo_pid);
+        return neo_pid;
     }
 
     // Cooldown after a failed sweep with jitter (1.8s - 2.7s)
