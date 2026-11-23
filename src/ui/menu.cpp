@@ -21,6 +21,8 @@
 #include "Android_draw/draw.h"
 #include "Android_touch/TouchHelperA.h"
 #include "other/settings_guard.hpp"
+#include "other/memory.hpp"
+#include "kpm.h"
 #include "func/esp.hpp"
 #include "func/aim.hpp"
 #include "cfg.hpp"
@@ -597,10 +599,10 @@ namespace ui::menu {
                 ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, 22.0f * ui_scale);
 
                 // ============================================================
-                // TAB 0: INFO
+                // TAB 0: INFO & KPM LIVE TELEMETRY
                 // ============================================================
                 if (activeTab == 0) {
-                    DrawSectionHeader(cdl, "Info", ui_scale);
+                    DrawSectionHeader(cdl, "System Controls", ui_scale);
 
                     if (DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale)) {
                         if (!cfg::master_enabled) {
@@ -609,10 +611,100 @@ namespace ui::menu {
                     }
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawSectionHeader(cdl, "System Status", ui_scale);
+                    DrawSectionHeader(cdl, "Driver Engine & Mode Selection", ui_scale);
 
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Status: System Active");
-                    ImGui::Text("Screen Capture: Stealth / Clean Stream");
+                    ImGui::Text("Backend Engine:");
+                    const char* modeLabels[] = { "AUTO", "TB KPM", "NEO KPM", "SYSCALL" };
+                    float btnW = (curWinSize.x - contentPadX * 2.0f - 18.0f * ui_scale) / 4.0f;
+                    for (int m = 0; m < 4; m++) {
+                        if (m > 0) ImGui::SameLine(0, 6.0f * ui_scale);
+                        bool is_sel = (kpm.diag.selected_engine == m);
+                        if (is_sel) {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.8f, 0.2f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+                        } else {
+                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.16f, 0.12f, 1.0f));
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+                        }
+                        if (ImGui::Button(modeLabels[m], ImVec2(btnW, 36.0f * ui_scale))) {
+                            kpm.diag.selected_engine = m;
+                            kpm.test_connection(proc::pid);
+                        }
+                        ImGui::PopStyleColor(2);
+                    }
+
+                    ImGui::Dummy(ImVec2(0, 4.0f * ui_scale));
+                    DrawToggleSwitch("Auto Fallback to Syscall", &kpm.diag.auto_fallback, 48.0f * ui_scale, ui_scale);
+
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    DrawSectionHeader(cdl, "Live Kernel & Driver Telemetry", ui_scale);
+
+                    if (kpm.diag.is_connected) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Driver State: CONNECTED");
+                    } else if (kpm.diag.auto_fallback && kpm.diag.active_engine == KPM_ENGINE_SYSCALL) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.0f, 1.0f), "Driver State: SYSCALL FALLBACK (ACTIVE)");
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Driver State: DISCONNECTED (KPM NOT RESPONDING)");
+                    }
+
+                    ImGui::Text("Active Engine: %s", kpm.get_active_engine_name());
+
+                    // Detailed TB KPM Diagnostics
+                    if (kpm.diag.tb_ret >= 0 || kpm.diag.tb_works) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "TB KPM (0x63687501): OK (ret=%d, errno=%d)", kpm.diag.tb_ret, kpm.diag.tb_errno);
+                    } else if (kpm.diag.tb_errno == 22) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "TB KPM (0x63687501): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", kpm.diag.tb_ret);
+                    } else {
+                        ImGui::Text("TB KPM (0x63687501): ret=%d, errno=%d", kpm.diag.tb_ret, kpm.diag.tb_errno);
+                    }
+
+                    // Detailed Neo KPM Diagnostics
+                    if (kpm.diag.neo_ret == 0 && (kpm.diag.neo_result == 0 || kpm.diag.neo_works)) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Neo KPM (0x4E41): OK (ret=%d, res=%d)", kpm.diag.neo_ret, kpm.diag.neo_result);
+                    } else if (kpm.diag.neo_errno == 22) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Neo KPM (0x4E41): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", kpm.diag.neo_ret);
+                    } else {
+                        ImGui::Text("Neo KPM (0x4E41): ret=%d, res=%d, errno=%d", kpm.diag.neo_ret, kpm.diag.neo_result, kpm.diag.neo_errno);
+                    }
+
+                    ImGui::Text("Syscall 270: ret=%d [%s]",
+                                kpm.diag.syscall_ret, kpm.diag.syscall_works ? "OK" : "Idle");
+
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    DrawSectionHeader(cdl, "Target Process & Memory", ui_scale);
+
+                    if (proc::pid > 0) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Game PID: %d (Active Target)", proc::pid);
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Game PID: Searching (Free Fire)...");
+                    }
+
+                    if (proc::lib > 0) {
+                        uint32_t magic = kpm.read<uint32_t>(proc::lib);
+                        if (magic == 0x464C457F) {
+                            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "libil2cpp: 0x%lx (ELF OK: 0x464C457F)", (unsigned long)proc::lib);
+                        } else {
+                            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "libil2cpp: 0x%lx (Magic: 0x%08X FAIL)", (unsigned long)proc::lib, magic);
+                        }
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "libil2cpp: Not Resolved");
+                    }
+
+                    size_t pCount = 0;
+                    {
+                        std::lock_guard<std::mutex> lk(data::players_mutex);
+                        pCount = data::players.size();
+                    }
+                    ImGui::Text("Entity Scraper: %zu players in cache", pCount);
+                    ImGui::Text("Reads: %llu total / %llu failed",
+                                (unsigned long long)kpm.diag.total_reads,
+                                (unsigned long long)kpm.diag.failed_reads);
+
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    if (ImGui::Button("Test / Re-detect KPM Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
+                        kpm.test_connection(proc::pid);
+                        if (proc::pid > 0) proc::lib = get_lib();
+                    }
                 }
                 // ============================================================
                 // TAB 1: VISUAL (EXACT REPLICA OF USER SCREENSHOT)

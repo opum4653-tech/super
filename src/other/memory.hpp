@@ -104,12 +104,6 @@ inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
 
 inline bool mem_read(uint64_t a, void* b, size_t l) {
     if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
-    if (!kpm.is_active()) {
-        if (!kpm.init(false)) {
-            memset(b, 0, l);
-            return false;
-        }
-    }
     kpm.initialize(proc::pid);
     if (!kpm.read(static_cast<uintptr_t>(a), b, l)) {
         memset(b, 0, l);
@@ -120,9 +114,6 @@ inline bool mem_read(uint64_t a, void* b, size_t l) {
 
 inline bool mem_write(uint64_t a, const void* b, size_t l) {
     if (proc::pid <= 0 || !is_valid_ptr(a) || l == 0 || b == nullptr) return false;
-    if (!kpm.is_active()) {
-        if (!kpm.init(false)) return false;
-    }
     kpm.initialize(proc::pid);
     return kpm.write(static_cast<uintptr_t>(a), b, l);
 }
