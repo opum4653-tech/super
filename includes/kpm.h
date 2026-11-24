@@ -425,7 +425,7 @@ public:
     }
 
     // ------------------------------------------------------------------------
-    // UNIFIED SMART MEMORY WRITE
+    // UNIFIED SMART MEMORY WRITE (RING-0 KPM PRIORITY)
     // ------------------------------------------------------------------------
     bool write(uintptr_t addr, const void *buffer, size_t size) {
         if (this->pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
@@ -433,10 +433,28 @@ public:
         if (mode == KPM_ENGINE_AUTO) mode = diag.active_engine;
 
         if (mode == KPM_ENGINE_TB) {
-            return tb_kpm_write(this->pid, addr, buffer, size);
+            if (tb_kpm_write(this->pid, addr, buffer, size)) return true;
         } else if (mode == KPM_ENGINE_NEO) {
-            return neo_kpm_write(this->pid, addr, buffer, size);
-        } else if (mode == KPM_ENGINE_SYSCALL || diag.auto_fallback) {
+            if (neo_kpm_write(this->pid, addr, buffer, size)) return true;
+        } else if (mode == KPM_ENGINE_SYSCALL) {
+            return syscall_write(this->pid, addr, buffer, size);
+        } else {
+            // AUTO MODE: Try KPM Ring-0 drivers first
+            if (tb_kpm_write(this->pid, addr, buffer, size)) {
+                diag.active_engine = KPM_ENGINE_TB;
+                return true;
+            }
+            if (neo_kpm_write(this->pid, addr, buffer, size)) {
+                diag.active_engine = KPM_ENGINE_NEO;
+                return true;
+            }
+            if (diag.auto_fallback) {
+                return syscall_write(this->pid, addr, buffer, size);
+            }
+        }
+
+        // Secondary fallback if primary engine returned failure
+        if (diag.auto_fallback) {
             return syscall_write(this->pid, addr, buffer, size);
         }
         return false;
