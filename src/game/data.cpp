@@ -49,10 +49,6 @@ namespace data {
     static std::atomic<bool> g_run{false};
     static std::thread       g_thread;
 
-    // Visibility debouncer: eliminates 1-frame flickering when enemies pass behind thin foliage
-    static std::unordered_map<uint64_t, int>  g_visCounter;
-    static std::unordered_map<uint64_t, bool> g_visStable;
-
     // Consecutive camera-resolution failures. A single bad read is tolerated to
     // avoid ESP flicker; sustained failure clears projections instead of aiming
     // with last frame's (stale) camera matrix.
@@ -316,8 +312,6 @@ namespace data {
                 std::lock_guard<std::mutex> lk(loots_mutex);
                 if (!loots.empty()) loots.clear();
             }
-            if (!g_visStable.empty()) g_visStable.clear();
-            if (!g_visCounter.empty()) g_visCounter.clear();
             return;
         }
 
@@ -343,8 +337,6 @@ namespace data {
         if (!localPlayer) {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
-            g_visStable.clear();
-            g_visCounter.clear();
             return;
         }
 
@@ -495,30 +487,7 @@ namespace data {
             auto uma = rpm<uint64_t>(avatarMgr + Offsets::Avatar_Uma);
             if (!uma) continue;
 
-            bool rawVisible = rpm<bool>(uma + Offsets::Uma_Visible);
-
-            // Debounce visibility state across frames
-            bool visible;
-            {
-                auto it = g_visStable.find(enemy);
-                if (it == g_visStable.end()) {
-                    g_visStable[enemy] = rawVisible;
-                    g_visCounter[enemy] = 0;
-                    visible = rawVisible;
-                } else if (it->second == rawVisible) {
-                    g_visCounter[enemy] = 0;
-                    visible = rawVisible;
-                } else {
-                    g_visCounter[enemy]++;
-                    if (g_visCounter[enemy] >= 2) {
-                        g_visStable[enemy] = rawVisible;
-                        g_visCounter[enemy] = 0;
-                        visible = rawVisible;
-                    } else {
-                        visible = it->second;
-                    }
-                }
-            }
+            bool visible = rpm<bool>(uma + Offsets::Uma_Visible);
 
             // Zero-overhead filtering: drop teammates & local user
             auto umaData = rpm<uint64_t>(uma + Offsets::Uma_Data);
@@ -620,12 +589,6 @@ namespace data {
             tmp.push_back(pd);
         }
 
-        // Clean up debounce cache if map exceeds 200 stale entries
-        if (g_visStable.size() > 200) {
-            g_visStable.clear();
-            g_visCounter.clear();
-        }
-
         // Atomic double-buffer swap into shared state container
         {
             std::lock_guard<std::mutex> lk(players_mutex);
@@ -634,31 +597,12 @@ namespace data {
     }
 
     // ------------------------------------------------------------------------
-    // BACKGROUND READER THREAD CADENCE
+    // REAL-TIME BACKGROUND READER THREAD
     // ------------------------------------------------------------------------
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             update();
-
-            // Aim needs fresh heads at 60 Hz. Pure ESP only needs ~20 Hz:
-            // re-scraping 32 entities at 60 Hz was the largest query source.
-            const bool aimActive = cfg::master_enabled && cfg::aim::enable;
-            int iv = aimActive ? cfg::aim::read_interval_ms : cfg::aim::esp_interval_ms;
-            if (iv < 8) iv = 8;
-            if (iv > 100) iv = 100;
-
-            // In lobby or between matches: throttle politely to 100ms (10 checks/sec)
-            if (!inMatch.load(std::memory_order_relaxed)) {
-                iv = 100;
-            } else {
-                // Anti-detection timing jitter: +/- 2ms non-periodic cadence.
-                static uint32_t s_jitterRng = 0x12345678;
-                s_jitterRng = s_jitterRng * 1103515245 + 12345;
-                iv += static_cast<int>((s_jitterRng % 5) - 2);
-                if (iv < 5) iv = 5;
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(iv));
+            sched_yield();
         }
     }
 

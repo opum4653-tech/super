@@ -70,9 +70,8 @@ namespace aimbot {
     // ------------------------------------------------------------------------
     // Prevents target jumping and screen shaking when 2+ enemies are in the FOV circle.
     // Once locked to an enemy address, the lock is retained until the target dies,
-    // leaves the extended FOV radius, or the grace period expires.
+    // leaves the extended FOV radius, or trigger releases.
     inline uint64_t s_lockedTargetAddr = 0;
-    inline int      s_lockTimeoutTicks = 0;
 
     // Smooth direction tracking across frame updates
     inline Vector3 s_smoothDir = Vector3::Zero();

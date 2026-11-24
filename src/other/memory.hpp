@@ -203,14 +203,6 @@ inline int get_pid() {
         return neo_pid;
     }
 
-    // Cooldown after a failed sweep with jitter (1.8s - 2.7s)
-    static long long s_next_scan_ms = 0;
-    static unsigned  s_scan_seq     = 0;
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    long long now_ms = (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-    if (now_ms < s_next_scan_ms) return -1;
-
     int pfd = sys::openat(AT_FDCWD, oxorany("/proc"), O_RDONLY | O_DIRECTORY);
     if (pfd < 0) return -1;
 
@@ -276,8 +268,6 @@ inline int get_pid() {
     if (found > 0) {
         proc::pid_cache = found;
         kpm.initialize(found);
-    } else {
-        s_next_scan_ms = now_ms + 1800 + (long long)((s_scan_seq++ * 137u) % 900u);
     }
     return found;
 }

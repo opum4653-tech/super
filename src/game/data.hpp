@@ -21,7 +21,7 @@ namespace data {
 
     // Lifecycle Controls
     void update();        // Single-pass memory scrape iteration
-    void thread_start();  // Starts background memory reader thread (throttled by cfg::aim::read_interval_ms)
+    void thread_start();  // Starts background real-time memory reader thread
     void thread_stop();   // Gracefully terminates reader thread and clears memory containers
 
     // Synchronized Entity Containers (Guarded by dedicated mutexes)

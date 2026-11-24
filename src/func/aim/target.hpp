@@ -42,7 +42,6 @@ namespace aimbot {
         // Verify local player is alive
         if (rpm<bool>(localPlayer + Offsets::Player::IsDead)) {
             s_lockedTargetAddr = 0;
-            s_lockTimeoutTicks = 0;
             return result;
         }
 
@@ -60,10 +59,8 @@ namespace aimbot {
         }
         result.triggerActive = triggerActive;
 
-        if (triggerActive) {
-            s_lockTimeoutTicks = 30; // Active trigger: refresh lock lease
-        } else if (s_lockTimeoutTicks > 0) {
-            s_lockTimeoutTicks--;    // Grace period across rapid-fire intervals
+        if (!triggerActive) {
+            s_lockedTargetAddr = 0;
         }
 
         std::vector<PlayerData> enemies;
@@ -168,7 +165,6 @@ namespace aimbot {
                 result.target = *bestEnemy;
                 result.valid = true;
                 s_lockedTargetAddr = result.target.addr;
-                s_lockTimeoutTicks = 30;
             }
         }
 

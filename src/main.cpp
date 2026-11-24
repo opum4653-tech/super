@@ -200,12 +200,12 @@ static int start_overlay() {
                                 data::thread_stop();
                                 break;
                             }
-                            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                            sched_yield();
                         }
                     }
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            sched_yield();
         }
     });
     attach_worker.detach();

@@ -1,20 +1,19 @@
 #pragma once
 // ============================================================================
-// AIMBOT — DUAL-THREAD TRAJECTORY & HEADSHOT INJECTION ENGINE
+// AIMBOT — REAL-TIME DUAL-THREAD TRAJECTORY & HEADSHOT INJECTION ENGINE
 // ============================================================================
 // Project: crack_master (Pure External Ring-3 Assisted Aim)
 // Sourced from: pewpew (includes/func/silent.hpp) & STORM_MODS (Server.cpp)
 //
-// DUAL-THREAD PRODUCER / CONSUMER ARCHITECTURE:
-// 1. High-Speed Writer Thread (writer_loop):
-//    Runs with sched_yield() during active firing, continuously writing g_targetDir
-//    to local weapon's AimInfo.Direction (0x40 RayDir in maxff.h) and setting enemy
-//    ColliderBody (0x80) to ColliderHead (0x740).
-//    This prevents the game engine from overwriting the raycast vector before
-//    the bullet spawns, guaranteeing 100% headshot registration!
-// 2. Target Selector Thread (producer_loop):
-//    Runs target acquisition, calculates 3D displacement trajectory (targetHead - ammoBase),
-//    applies smooth interpolation, and updates the shared lock state.
+// ZERO ARTIFICIAL TIMERS / REAL-TIME ARCHITECTURE:
+// - No artificial sleeps, no cooldown timers, no tick delays.
+// - All operations run in pure real-time with sched_yield() CPU scheduling.
+// - 1. High-Speed Writer Thread (writer_loop):
+//      Continuously floods g_targetDir to local weapon's AimInfo.Direction (0x40 RayDir)
+//      and redirects target ColliderBody (0x80) to ColliderHead (0x740) in real-time.
+// - 2. Target Selector Thread (producer_loop):
+//      Continuously tracks enemy positions in real-time, computing the exact 3D
+//      displacement trajectory (targetHead - ammoBase) without artificial throttling.
 // ============================================================================
 
 #include "common.hpp"
@@ -25,7 +24,6 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
-#include <chrono>
 
 namespace aimbot {
 
@@ -46,24 +44,20 @@ namespace aimbot {
 
     inline void clear_aim_state() {
         s_lockedTargetAddr = 0;
-        s_lockTimeoutTicks = 0;
         s_smoothDir = Vector3::Zero();
     }
 
     // ------------------------------------------------------------------------
-    // HIGH-SPEED WRITER THREAD (Zero-Latency Raycast Flooding)
+    // REAL-TIME HIGH-SPEED WRITER THREAD (Zero Artificial Sleep)
     // ------------------------------------------------------------------------
-    // Matched directly to pewpew/src/func/silent.hpp & STORM_MODS/Server.cpp.
-    // Continuously writes target trajectory to weapon AimInfo + 0x40 and redirects
-    // target's body collider (+0x80) to head collider (+0x740).
     inline void writer_loop() {
         while (g_aim_running.load(std::memory_order_relaxed)) {
             if (!g_hasData.load(std::memory_order_relaxed) || g_hitObj == 0) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                sched_yield();
                 continue;
             }
 
-            // Zero-delay continuous memory flooding while firing
+            // Real-time zero-delay continuous memory flooding while firing
             {
                 std::lock_guard<std::mutex> lock(g_silent_lock);
                 if (g_hasData.load(std::memory_order_relaxed) && g_hitObj != 0) {
@@ -81,7 +75,7 @@ namespace aimbot {
     }
 
     // ------------------------------------------------------------------------
-    // PRODUCER / TARGET ACQUISITION THREAD
+    // REAL-TIME PRODUCER / TARGET ACQUISITION THREAD (Zero Artificial Sleep)
     // ------------------------------------------------------------------------
     inline void producer_loop() {
         while (g_aim_running.load(std::memory_order_relaxed)) {
@@ -92,7 +86,7 @@ namespace aimbot {
                     std::lock_guard<std::mutex> lk(g_targetMutex);
                     g_currentTarget.valid = false;
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(8));
+                sched_yield();
                 continue;
             }
 
@@ -104,7 +98,7 @@ namespace aimbot {
                     std::lock_guard<std::mutex> lk(g_targetMutex);
                     g_currentTarget.valid = false;
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(8));
+                sched_yield();
                 continue;
             }
 
@@ -118,7 +112,7 @@ namespace aimbot {
                     std::lock_guard<std::mutex> lk(g_targetMutex);
                     g_currentTarget.valid = false;
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                sched_yield();
                 continue;
             }
 
@@ -137,7 +131,7 @@ namespace aimbot {
 
             if (!is_valid_ptr(aimInfo)) {
                 clear_silent_data();
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                sched_yield();
                 continue;
             }
 
@@ -150,7 +144,7 @@ namespace aimbot {
 
             if (ammoBase == Vector3::Zero() || !std::isfinite(ammoBase.x)) {
                 clear_silent_data();
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                sched_yield();
                 continue;
             }
 
@@ -158,7 +152,7 @@ namespace aimbot {
             Vector3 targetHead = acq.target.getHeadAimPoint(cfg::aim::head_bias);
             if (targetHead == Vector3::Zero() || !std::isfinite(targetHead.x)) {
                 clear_silent_data();
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                sched_yield();
                 continue;
             }
 
@@ -170,7 +164,7 @@ namespace aimbot {
 
             if (dir.sqrMagnitude() <= 1e-4f) {
                 clear_silent_data();
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+                sched_yield();
                 continue;
             }
 
@@ -200,14 +194,13 @@ namespace aimbot {
                 g_hasData.store(true, std::memory_order_relaxed);
             }
 
-            // Yield briefly during active firing so writer thread gets maximum CPU throughput
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            sched_yield();
         }
     }
 
     // Single-tick update for synchronous callers (menu / UI tests)
     inline void update() {
-        // Producer thread handles background loop automatically
+        // Real-time background threads handle updates continuously
     }
 
     // ------------------------------------------------------------------------

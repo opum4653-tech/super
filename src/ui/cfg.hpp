@@ -59,11 +59,6 @@ namespace esp {
 }
 
 namespace aim {
-    inline int   read_interval_ms = 16;   // Aimbot tick (ms). 16 = natural 60 Hz frame cadence.
-    // ESP-only reader cadence. When no aim mode is active there is no reason to
-    // re-scrape every entity at 60 Hz: overlay boxes only need ~20 Hz to look
-    // smooth. This is the single biggest syscall reduction in the project.
-    inline int   esp_interval_ms  = 50;
     inline bool  enable           = false; // One and only aim path: drag headshot.
     inline bool  show_fov         = false;
     inline float aim_fov          = 90.0f;  // Default 90 deg acquisition FOV
