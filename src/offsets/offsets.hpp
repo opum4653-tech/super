@@ -264,9 +264,9 @@ namespace Offsets {
     constexpr uintptr_t DropObject_Scale         = Loot::DropObject_Scale;
     constexpr uintptr_t DropObject_Landed        = Loot::DropObject_Landed;
 
-    // Direct maxff.h Collider Aliases for 100% Headshot Redirection
-    constexpr uintptr_t Colider_Field            = Player::LockedAimingCollider; // 0x80 (Colider_Field / ColliderBody)
-    constexpr uintptr_t HedColider               = Player::HeadCollider;         // 0x740 (HedColider / ColliderHead)
+    // Deprecated collider aliases (Silent Aim neutralized permanently to prevent fake damage)
+    constexpr uintptr_t Colider_Field            = Player::LockedAimingCollider; // 0x80 (Obsolete)
+    constexpr uintptr_t HedColider               = Player::HeadCollider;         // 0x740 (Obsolete)
 
     constexpr uintptr_t Head                     = Bone_Head;
     constexpr uintptr_t Hip                      = Bone_Hip;

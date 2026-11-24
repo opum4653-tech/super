@@ -59,14 +59,12 @@ namespace esp {
 }
 
 namespace aim {
-    inline bool  enable           = false; // One and only aim path: drag headshot.
-    inline bool  show_fov         = false;
+    inline bool  enable           = false; // Target Lock Reticle (Visual Assist, Zero Fake Damage)
+    inline bool  show_fov         = false; // Render FOV Circle
     inline float aim_fov          = 90.0f;  // Default 90 deg acquisition FOV
     inline float fov_radius       = 200.0f; // Default 200px screen radius
-    inline float smooth           = 0.0f;   // 0.0f default: instant drag shot
-    // Target bone is intentionally not configurable. We always steer into the
-    // head — there is no headshot roll and no body fallback: 100% head lock.
-    inline float head_bias        = 0.0f;   // 0.0f default: zero forced bias
+    inline float smooth           = 0.0f;
+    inline float head_bias        = 0.0f;
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
     inline bool  ignore_bots      = false;

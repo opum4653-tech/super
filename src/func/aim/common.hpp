@@ -76,13 +76,5 @@ namespace aimbot {
     // Smooth direction tracking across frame updates
     inline Vector3 s_smoothDir = Vector3::Zero();
 
-    // High-speed writer thread state (Two-Thread Architecture from pewpew & STORM_MODS)
-    inline std::mutex        g_silent_lock;
-    inline uint64_t          g_hitObj = 0;
-    inline Vector3           g_targetDir = Vector3::Zero();
-    inline uint64_t          g_targetEnemy = 0;
-    inline uint64_t          g_targetHeadCollider = 0;
-    inline std::atomic<bool> g_hasData{false};
-
 } // namespace aimbot
 

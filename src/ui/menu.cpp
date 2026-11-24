@@ -785,8 +785,7 @@ namespace ui::menu {
 
                     DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
-                    // Single aim path: Drag Headshot. "Aim Silent" was removed.
-                    DrawToggleSwitch("Drag Headshot (100% Head)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Aim Target Lock (FOV Reticle)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 
@@ -814,19 +813,9 @@ namespace ui::menu {
                     ImGui::Combo("##AimPriority", &cfg::aim::priority_mode, priorityModes, 3);
                     ImGui::TextDisabled("Target Priority Mode");
 
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Head Lock: 100%% (always)");
-                    ImGui::TextDisabled("Every bullet is dragged to the head bone.");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##HeadBias", &cfg::aim::head_bias, -0.20f, 0.30f, "%.2f m");
-                    ImGui::TextDisabled("Head Center Alignment (Bias)");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 0.0f, 25.0f, "%.1f");
-                    ImGui::TextDisabled("Aim Smoothness");
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    ImGui::TextColored(ImVec4(0.0f, 0.9f, 1.0f, 1.0f), "Damage Mode: 100%% Real Damage (Zero Fake Damage)");
+                    ImGui::TextDisabled("Silent Aim removed permanently (server-side patched).");
                 }
                 // ============================================================
                 // TAB 3: MOTION (ANTI-BAN PROTECTED)
