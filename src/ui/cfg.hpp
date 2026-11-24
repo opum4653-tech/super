@@ -66,26 +66,18 @@ namespace aim {
     inline int   esp_interval_ms  = 50;
     inline bool  enable           = false; // One and only aim path: drag headshot.
     inline bool  show_fov         = false;
-    inline float aim_fov          = 0.0f;   // 0.0f default: fully controlled from menu slider
-    inline float fov_radius       = 0.0f;   // 0.0f default
-    inline float smooth           = 0.0f;   // 0.0f default: fully controlled from menu slider
+    inline float aim_fov          = 90.0f;  // Default 90 deg acquisition FOV
+    inline float fov_radius       = 200.0f; // Default 200px screen radius
+    inline float smooth           = 0.0f;   // 0.0f default: instant drag shot
     // Target bone is intentionally not configurable. We always steer into the
     // head — there is no headshot roll and no body fallback: 100% head lock.
     inline float head_bias        = 0.0f;   // 0.0f default: zero forced bias
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
     inline bool  ignore_bots      = false;
-    inline float max_distance     = 0.0f;  // 0.0f default: fully controlled from menu
+    inline float max_distance     = 0.0f;  // 0.0f default: unlimited (500m)
 
     // Resolves the aim acquisition radius in screen pixels.
-    //
-    // A return value of 0 is interpreted by target.hpp as "no limit": the
-    // hysteresis check `fovLimit <= 0.0f` passes unconditionally and the
-    // acquisition check `fovLimit > 0.0f && ...` never filters. With both
-    // aim_fov and fov_radius at their 0 defaults that meant aim would lock
-    // onto any visible enemy anywhere on screen — including one at the far
-    // edge — and drag bullets at extreme angles.
-    // Fall back to a sane pixel radius instead of "unlimited".
     inline float get_fov_radius() {
         if (aim_fov > 0.0f && g_sw > 0.0f) {
             return (aim_fov / 180.0f) * (g_sw * 0.55f);
@@ -93,8 +85,8 @@ namespace aim {
         if (fov_radius > 0.0f) {
             return fov_radius;
         }
-        // Neither configured: 12% of screen width (~130 px on a 1080-wide view).
-        return (g_sw > 0.0f) ? (g_sw * 0.12f) : 120.0f;
+        // Neither configured: 25% of screen width (~270 px on a 1080-wide view).
+        return (g_sw > 0.0f) ? (g_sw * 0.25f) : 250.0f;
     }
 }
 

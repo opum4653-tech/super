@@ -46,11 +46,10 @@ namespace aimbot {
             return result;
         }
 
-        // FIRING STATE — the only trigger input we still read.
-        // maxff.h confirms isFiring == 0x850. The old duplicate read and the
-        // whole camera-FOV scoping chain were queries used only by the deleted
-        // Aim Silent / sniper-lock paths; removed to cut per-tick syscalls.
-        bool isFiring = rpm<bool>(localPlayer + Offsets::Player::IsFiring);
+        // FIRING STATE — verified from maxff.h (isFiring == 0x850)
+        // Read as int32 to safely capture boolean/bitflag values > 0
+        int isFiringRaw = rpm<int>(localPlayer + Offsets::Player::IsFiring);
+        bool isFiring = (isFiringRaw > 0);
         result.isFiring = isFiring;
 
         bool triggerActive = false;
@@ -92,7 +91,7 @@ namespace aimbot {
                     // enabling "Ignore AI Bots" or lowering Max Target Distance
                     // while locked kept steering at a now-excluded enemy until
                     // it happened to leave the 1.35x grace radius.
-                    bool lockAllowed = enemy.curHP > 0 && enemy.Head.z >= 0.05f && enemy.isVisible;
+                    bool lockAllowed = enemy.curHP > 0 && enemy.Head.z >= 0.001f && enemy.isVisible;
                     if (lockAllowed && cfg::aim::ignore_bots && enemy.isBot) lockAllowed = false;
                     if (lockAllowed && cfg::aim::max_distance > 0.0f &&
                         enemy.distance > cfg::aim::max_distance) lockAllowed = false;
@@ -126,7 +125,7 @@ namespace aimbot {
             const PlayerData* bestEnemy = nullptr;
 
             for (const auto& enemy : enemies) {
-                if (enemy.Head.z < 0.05f || enemy.curHP <= 0) continue;
+                if (enemy.Head.z < 0.001f || enemy.curHP <= 0) continue;
                 if (cfg::aim::ignore_bots && enemy.isBot) continue;
 
                 // Anti-Ban Invariant: Strictly require line-of-sight visibility (matching pewpew).
