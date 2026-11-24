@@ -43,8 +43,8 @@ namespace esp {
     inline bool  loot             = false;
 
 // Setting
-    inline float max_range        = 250.f;
-    inline float loot_range       = 150.f;
+    inline float max_range        = 0.0f;  // 0.0f = Official Game Range (Uncapped)
+    inline float loot_range       = 0.0f;  // 0.0f = Official Game Range (Uncapped)
     inline float box_rounding     = 3.f;
     inline float box_thickness    = 2.0f;
     inline float tracer_thickness = 1.2f;

@@ -46,7 +46,7 @@ namespace func::esp {
             if (p.Head.z < 0.001f || p.Toe.z < 0.001f) continue;
             if (p.curHP <= 0) continue;
             if (cfg::esp::ignore_bots && p.isBot) continue;
-            if (p.distance > cfg::esp::max_range) continue;
+            if (cfg::esp::max_range > 0.0f && p.distance > cfg::esp::max_range) continue;
 
             PlayerBox pb = computePlayerBox(p);
             if (!pb.valid) continue;

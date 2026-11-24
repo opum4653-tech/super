@@ -42,7 +42,7 @@ namespace func::esp {
         }
 
         ImVec2 head(p.Head.x, p.Head.y);
-        float aa = ImClamp(1.f - p.distance / cfg::esp::max_range, 0.25f, 1.f);
+        float aa = (cfg::esp::max_range > 0.0f) ? ImClamp(1.f - p.distance / cfg::esp::max_range, 0.25f, 1.f) : 1.0f;
         float tThick = cfg::esp::tracer_thickness;
 
         // Dynamic laser line with soft ambient glow

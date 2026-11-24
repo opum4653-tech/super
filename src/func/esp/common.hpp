@@ -55,6 +55,7 @@ namespace func::esp {
     }
 
     inline ImU32 fadeDist(ImU32 base, float dist, float maxRange) {
+        if (maxRange <= 0.0f) return base; // Official Game Range - No artificial attenuation
         float t = ImClamp(1.f - dist / maxRange, 0.35f, 1.f);
         return withAlpha(base, t);
     }

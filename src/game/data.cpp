@@ -221,7 +221,7 @@ namespace data {
             if (w == Vector3::Zero()) continue;
 
             float dist = calculate_distance(localPos, w);
-            if (dist > cfg::esp::loot_range) continue;
+            if (cfg::esp::loot_range > 0.0f && dist > cfg::esp::loot_range) continue;
 
             Vector3 sc = WorldToScreenPoint(viewMatrix, w);
             if (sc.x < 0) continue;
@@ -510,19 +510,10 @@ namespace data {
             // The drag shot is head-only, so reading them was pure query waste.
 
             float dist = calculate_distance(localPos, headWorld);
-            // One scraper serves both ESP and aim. Gating on cfg::esp::max_range
-            // alone silently capped aim at the ESP slider value: a 50 m ESP range
-            // disabled aim at 150 m. Widen the scrape when aim is active.
-            float scrapeRange = cfg::esp::max_range;
-            if (cfg::aim::enable) {
-                float aimRange = cfg::aim::max_distance;
-                if (aimRange > 0.0f) {
-                    if (aimRange > scrapeRange) scrapeRange = aimRange;
-                } else {
-                    scrapeRange = 500.0f; // aim max_distance == 0 means unlimited
-                }
-            }
-            if (dist < 0.8f || dist > scrapeRange) continue;
+            // Official Game Range: Zero artificial distance capping.
+            // Every active entity spawned in game memory is processed.
+            if (dist < 0.8f) continue;
+            if (cfg::esp::max_range > 0.0f && dist > cfg::esp::max_range) continue;
 
             // 2D Screen Projections
             Vector3 headScreen = WorldToScreenPoint(viewMatrix, headWorld);

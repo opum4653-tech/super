@@ -754,9 +754,8 @@ namespace ui::menu {
                     ImGui::TextDisabled("Tracer Line Origin");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##MaxRange", &cfg::esp::max_range, 50.0f, 500.0f, "%.0f m");
-                    ImGui::TextDisabled("Max Render Distance");
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Render Range: Official Game Range (Uncapped)");
+                    ImGui::TextDisabled("All active entities rendered within official game visibility.");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
@@ -797,9 +796,8 @@ namespace ui::menu {
                     ImGui::TextDisabled("AimFov (0 - 180)");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##AimMaxDist", &cfg::aim::max_distance, 0.0f, 500.0f, "%.0f m");
-                    ImGui::TextDisabled("Max Target Distance (0 = Unlimited)");
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Range: Official Game Range (Uncapped)");
+                    ImGui::TextDisabled("Tracks all active targets within official game visibility.");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* triggerModes[] = { "When Firing", "Always In FOV" };
