@@ -53,9 +53,6 @@ namespace aimbot {
 
     // ------------------------------------------------------------------------
     // SAFE 3D UNIT VECTOR NORMALIZATION
-    // ------------------------------------------------------------------------
-    // Protects against zero-length vectors, division-by-zero, and IEEE-754 NaN/Inf.
-    // Unity's Quaternion::LookRotation crashes or corrupts if fed an unnormalized or NaN vector.
     inline Vector3 SafeNormalize(const Vector3& v) {
         float lenSq = v.x * v.x + v.y * v.y + v.z * v.z;
         if (lenSq < 1e-6f || !std::isfinite(lenSq)) {
@@ -64,23 +61,6 @@ namespace aimbot {
         float invLen = 1.0f / sqrtf(lenSq);
         return Vector3(v.x * invLen, v.y * invLen, v.z * invLen);
     }
-
-    // ------------------------------------------------------------------------
-    // TARGET HYSTERESIS & STICKINESS STATE
-    // ------------------------------------------------------------------------
-    // Prevents target jumping and screen shaking when 2+ enemies are in the FOV circle.
-    // Once locked to an enemy address, the lock is retained until the target dies,
-    // leaves the extended FOV radius, or trigger releases.
-    inline uint64_t s_lockedTargetAddr = 0;
-
-    // Smooth direction tracking across frame updates
-    inline Vector3 s_smoothDir = Vector3::Zero();
-
-    // True Aimbot View Rotation State (AimRotation 0x61C from STORM_MODS & maxff.h)
-    inline std::mutex        g_aimbot_lock;
-    inline uint64_t          g_aimbot_player = 0;
-    inline Quaternion        g_aimbot_rotation = Quaternion::Identity();
-    inline std::atomic<bool> g_hasAimbotData{false};
 
 } // namespace aimbot
 
