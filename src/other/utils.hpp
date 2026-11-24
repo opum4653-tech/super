@@ -62,6 +62,9 @@ public:
         if (addr_valid(entriesArray)) {
             int len = rpm<int>(addr + 0x20);
             if (len <= 0 || len > 200) {
+                len = rpm<int>(addr + 0x24);
+            }
+            if (len <= 0 || len > 200) {
                 len = rpm<int>(entriesArray + 0x18);
             }
             if (len > 0 && len <= 200) {

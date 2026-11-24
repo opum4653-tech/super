@@ -204,14 +204,11 @@ namespace data {
         uint64_t dictPtr = rpm<uint64_t>(metaMgr + Offsets::MetaManager_DropObjects);
         if (!dictPtr) return;
 
-        uint64_t entries = rpm<uint64_t>(dictPtr + 0x18);
-        int count = rpm<int>(dictPtr + 0x20);
-        if (!entries || count <= 0 || count > 500) return;
+        MonoDictionary dict(dictPtr);
+        if (!dict.valid) return;
 
-        uint64_t base = entries + 0x20;
-        for (int i = 0; i < count; i++) {
-            uint64_t e = base + i * 0x18;
-            uint64_t dropObj = rpm<uint64_t>(e + 0x10);
+        for (int i = 0; i < dict.count; i++) {
+            uint64_t dropObj = dict.entry(i);
             if (!dropObj || dropObj < 0x100000) continue;
 
             bool landed = rpm<bool>(dropObj + Offsets::DropObject_Landed);
@@ -464,10 +461,13 @@ namespace data {
 
         int nv = dict.getNumValues();
         MonoDictionary::EntryBlock blk{};
+        bool blockOk = false;
         for (int i = 0; i < nv; i++) {
             // Dictionary slots come out of the array 64 at a time (block read optimization)
-            if (i % MonoDictionary::kBlockSize == 0 && !dict.read_block(i, blk)) break;
-            uint64_t enemy = blk.value[i % MonoDictionary::kBlockSize];
+            if (i % MonoDictionary::kBlockSize == 0) {
+                blockOk = dict.read_block(i, blk);
+            }
+            uint64_t enemy = blockOk ? blk.value[i % MonoDictionary::kBlockSize] : dict.entry(i);
             if (!enemy || enemy < 0x100000000 || enemy == localPlayer) continue;
 
             // One syscall for everything that lives on the player object itself
