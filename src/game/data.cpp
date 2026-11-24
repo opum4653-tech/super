@@ -291,6 +291,15 @@ namespace data {
 
         if (!BaseGame || !m_Match) return;
 
+        // In matches, localPlayer may transiently read 0 during parachute/respawn.
+        // Maintain savedLocalPlayer persistence (matches STORM_MODS line 986).
+        static uint64_t savedLocalPlayer = 0;
+        if (localPlayer != 0) {
+            savedLocalPlayer = localPlayer;
+        } else if (savedLocalPlayer != 0 && addr_valid(savedLocalPlayer)) {
+            localPlayer = savedLocalPlayer;
+        }
+
         int matchStateMatch = rpm<int>(m_Match + Offsets::MatchIsRunning);
         int matchStateBase  = rpm<int>(BaseGame + Offsets::MatchIsRunning);
         bool matchActive = (localPlayer != 0) ||
@@ -300,6 +309,7 @@ namespace data {
 
         // Clear states if match is over or in lobby
         if (!matchActive) {
+            savedLocalPlayer = 0;
             localPlayerAddr.store(0);
             {
                 std::lock_guard<std::mutex> lk(players_mutex);
@@ -420,6 +430,9 @@ namespace data {
         Vector3 localPos = Vector3::Zero();
         uint64_t headNode = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
         if (headNode) localPos = GetNodePosition(headNode);
+        if (localPos == Vector3::Zero() || !std::isfinite(localPos.x)) {
+            localPos = GetCameraPosition(viewMatrix);
+        }
 
         // 4. Ground Loot Scan
         if (cfg::esp::loot) {
@@ -429,16 +442,24 @@ namespace data {
             loots.clear();
         }
 
-        // 5. Enemy Players Dictionary Traversal (Candidates: 0xC0 and 0xC8 from maxff.h)
-        uint64_t dictAddr = rpm<uint64_t>(BaseGame + Offsets::Match_PlayerDict);
-        MonoDictionary dict(dictAddr);
-        if (!dict.valid) {
-            uint64_t altDict = rpm<uint64_t>(BaseGame + 0xC8); // LDictionaryEntities
-            if (altDict && altDict != dictAddr) {
-                MonoDictionary dict2(altDict);
-                if (dict2.valid) {
-                    dict = dict2;
-                }
+        // 5. Enemy Players Dictionary Traversal (Candidates: BaseGame + 0xC0/0xC8, m_Match + 0xC0/0xC8)
+        const uint64_t dictCandidates[] = {
+            rpm<uint64_t>(BaseGame + Offsets::Match_PlayerDict), // 0xC0 (DictionaryEntities)
+            rpm<uint64_t>(BaseGame + 0xC8),                      // 0xC8 (LDictionaryEntities for BR match)
+            rpm<uint64_t>(m_Match + Offsets::Match_PlayerDict),  // 0xC0 on Match
+            rpm<uint64_t>(m_Match + 0xC8)                       // 0xC8 on Match
+        };
+
+        MonoDictionary dict(0);
+        for (uint64_t candAddr : dictCandidates) {
+            if (!candAddr || candAddr < 0x10000) continue;
+            MonoDictionary testDict(candAddr);
+            if (testDict.valid && testDict.getNumValues() > 0) {
+                dict = testDict;
+                break;
+            }
+            if (testDict.valid && !dict.valid) {
+                dict = testDict;
             }
         }
 
@@ -470,9 +491,8 @@ namespace data {
             uint64_t enemy = blockOk ? blk.value[i % MonoDictionary::kBlockSize] : dict.entry(i);
             if (!enemy || enemy < 0x100000000 || enemy == localPlayer) continue;
 
-            // One syscall for everything that lives on the player object itself
+            // One syscall for everything that lives on the player object itself (falls back to rpm on error)
             PlayerSpan span(enemy);
-            if (!span.ok) continue;
 
             if (span.at<bool>(Offsets::Player_IsDead)) continue;
             bool isBot = span.at<bool>(Offsets::Player_IsBot);
@@ -493,11 +513,10 @@ namespace data {
                 if (uma) {
                     visible = rpm<bool>(uma + Offsets::Uma_Visible);
 
-                    // Zero-overhead filtering: drop teammates & local user
+                    // Zero-overhead filtering: drop teammates (matches STORM_MODS line 1076)
                     auto umaData = rpm<uint64_t>(uma + Offsets::Uma_Data);
                     if (umaData) {
                         if (rpm<bool>(umaData + Offsets::Avatar::UmaData_Teammate)) continue;
-                        if (rpm<bool>(umaData + Offsets::Avatar::UmaData_LocalPlayer)) continue;
                     }
                 }
             }
