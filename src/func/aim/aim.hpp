@@ -126,9 +126,9 @@ namespace aimbot {
                 hitObjAddress = rpm<uint64_t>(localPlayer + Offsets::Player_AimInfo_Alt);
             }
 
-            // Check firing state (maxff.h: isFiring == 0x850)
-            int isFiring = rpm<int>(localPlayer + Offsets::Player_IsFiring);
-            bool triggerActive = (cfg::aim::trigger_mode == 1) ? true : (isFiring > 0);
+            // Check firing state strictly as 1-byte bool (maxff.h: isFiring == 0x850, matching STORM_MODS)
+            bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
+            bool triggerActive = (cfg::aim::trigger_mode == 1) ? true : isFiring;
 
             if (triggerActive && is_valid_ptr(hitObjAddress) && acq.target.headWorld != Vector3::Zero()) {
                 // Resolve muzzle startPos (maxff.h: startPos == 0x4C)

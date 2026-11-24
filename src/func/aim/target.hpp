@@ -46,9 +46,8 @@ namespace aimbot {
         }
 
         // FIRING STATE — verified from maxff.h (isFiring == 0x850)
-        // Read as int32 to safely capture boolean/bitflag values > 0
-        int isFiringRaw = rpm<int>(localPlayer + Offsets::Player::IsFiring);
-        bool isFiring = (isFiringRaw > 0);
+        // Read strictly as 1-byte bool to prevent adjacent struct field contamination
+        bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player::IsFiring) != 0);
         result.isFiring = isFiring;
 
         bool triggerActive = false;
@@ -84,11 +83,8 @@ namespace aimbot {
             for (const auto& enemy : enemies) {
                 if (enemy.addr == s_lockedTargetAddr) {
                     // The lock must obey the same filters as fresh acquisition.
-                    // Previously it only checked HP / depth / visibility, so
-                    // enabling "Ignore AI Bots" or lowering Max Target Distance
-                    // while locked kept steering at a now-excluded enemy until
-                    // it happened to leave the 1.35x grace radius.
-                    bool lockAllowed = enemy.curHP > 0 && enemy.Head.z >= 0.001f && enemy.isVisible;
+                    // Matching STORM_MODS: do not gate aim on Uma_Visible flicker.
+                    bool lockAllowed = enemy.curHP > 0 && enemy.Head.z >= 0.001f;
                     if (lockAllowed && cfg::aim::ignore_bots && enemy.isBot) lockAllowed = false;
                     if (lockAllowed && cfg::aim::max_distance > 0.0f &&
                         enemy.distance > cfg::aim::max_distance) lockAllowed = false;
@@ -125,9 +121,7 @@ namespace aimbot {
                 if (enemy.Head.z < 0.001f || enemy.curHP <= 0) continue;
                 if (cfg::aim::ignore_bots && enemy.isBot) continue;
 
-                // Anti-Ban Invariant: Strictly require line-of-sight visibility (matching pewpew).
-                // Shooting occluded enemies through walls trips server-side geometry raycast bans.
-                if (!enemy.isVisible) continue;
+                // Matching STORM_MODS: FOV proximity targeting without frustum culling drops.
                 if (cfg::aim::max_distance > 0.0f && enemy.distance > cfg::aim::max_distance) continue;
 
                 // Head-only scoring matches the 100% head drag shot.
