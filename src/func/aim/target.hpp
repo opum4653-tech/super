@@ -74,7 +74,8 @@ namespace aimbot {
             if (enemy.Head.z < 0.001f) continue;
             if (enemy.hpValid && enemy.curHP <= 0) continue;
             if (rc.aimIgnoreBots && enemy.isBot) continue;
-            if (rc.aimMaxDistance > 0.0f && enemy.distance > rc.aimMaxDistance) continue;
+            // No code-side distance limit. The game's official weapon range
+            // decides whether a target is valid; we never filter by distance.
 
             // No hard screen-rect cull: g_sw/g_sh are captured once at overlay
             // start, so a mid-match rotation can make valid heads look "outside"

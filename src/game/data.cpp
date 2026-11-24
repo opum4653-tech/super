@@ -67,9 +67,12 @@ namespace data {
     // State-transition signal only: not an entity cache or fallback value.
     static std::atomic<bool> s_scrapeReady{false};
     static void set_scrape_ready(bool ready) {
-        if (s_scrapeReady.exchange(ready, std::memory_order_relaxed) != ready) {
-            cfg::notify_state_change();
-        }
+        const bool changed =
+            (s_scrapeReady.exchange(ready, std::memory_order_relaxed) != ready);
+        // Every fresh entity snapshot must wake the aim worker. The old
+        // edge-only signal let aim write once per enable and then sleep while
+        // the target kept moving. Menu-off only notifies on state change.
+        if (changed || ready) cfg::notify_state_change();
     }
 
     // Internal background thread state

@@ -1,23 +1,15 @@
 #pragma once
 // ============================================================================
-// FOV CIRCLE & ACTIVE TARGET LOCK VISUALIZER
+// FOV CIRCLE & HEAD GUIDANCE VISUALIZER
 // ============================================================================
-// Project: crack_master
-//
-// SYSTEM ROLE:
-// Renders the visual aim trigger radius and active target acquisition indicators:
-// - Outer FOV Ring: Warm amber + cyan rings for a high-contrast trigger boundary.
-// - Dynamic Scaling: Radius calculated from cfg::aim::get_fov_radius().
-// - Target Lock Ring: Red-and-white targeting reticle placed on target screen position
-//   whenever an enemy is actively locked by the aim hysteresis engine.
+// The circle is the AimFov boundary. Enemies whose head falls inside it get
+// head guidance; enemies outside it get nothing.
 // ============================================================================
 
 #include "common.hpp"
 
 namespace aimbot {
 
-    // FOV CIRCLE & ACTIVE TARGET LOCK VISUALIZER
-    // Scaled dynamically by cfg::aim::get_fov_radius()
     inline void render_fov(ImDrawList* dl) {
 
         const cfg::RuntimeConfig rc = cfg::runtime();
@@ -29,11 +21,9 @@ namespace aimbot {
         float cy = rc.screenH * 0.5f;
         float r  = rc.aimFovRadius;
 
-        // Distinct warm-cyan rings: readable over green ESP and dark terrain.
         dl->AddCircle(ImVec2(cx, cy), r, IM_COL32(255, 196, 64, 70), 64, 1.2f);
         dl->AddCircle(ImVec2(cx, cy), r + 1.0f, IM_COL32(64, 230, 255, 210), 64, 2.0f);
 
-        // If target is actively locked inside FOV, draw target lock ring (thread-safe snapshot)
         TargetInfo targetSnap;
         {
             std::lock_guard<std::mutex> lk(g_targetMutex);

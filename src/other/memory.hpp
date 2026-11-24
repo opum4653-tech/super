@@ -11,6 +11,7 @@
 // - Neo KPM: NA_PRCTL_MAGIC (0x4E41)
 // ============================================================================
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
@@ -115,6 +116,32 @@ inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
 // KPM MEMORY READ & WRITE (EXCLUSIVE ENGINE)
 // ============================================================================
 
+// Default-deny write guard. The caller must open a short-lived Scope for the
+// exact address/size it intends to write. No gameplay state may be written
+// outside that scope; the scope is stack-local and never persisted.
+namespace mem_guard {
+    inline std::atomic<uint64_t> allowed_addr{0};
+    inline std::atomic<size_t>   allowed_size{0};
+
+    inline bool allows(uint64_t a, size_t l) {
+        return allowed_addr.load(std::memory_order_relaxed) == a &&
+               allowed_size.load(std::memory_order_relaxed) == l;
+    }
+
+    struct Scope {
+        Scope(uint64_t a, size_t l) {
+            allowed_addr.store(a, std::memory_order_relaxed);
+            allowed_size.store(l, std::memory_order_relaxed);
+        }
+        ~Scope() {
+            allowed_addr.store(0, std::memory_order_relaxed);
+            allowed_size.store(0, std::memory_order_relaxed);
+        }
+        Scope(const Scope&) = delete;
+        Scope& operator=(const Scope&) = delete;
+    };
+}
+
 inline bool mem_read(uint64_t a, void* b, size_t l) {
     if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
     // Clear first: a KPM engine that reports success without actually copying
@@ -125,6 +152,7 @@ inline bool mem_read(uint64_t a, void* b, size_t l) {
 }
 
 inline bool mem_write(uint64_t a, const void* b, size_t l) {
+    if (!mem_guard::allows(a, l)) return false;
     if (proc::pid <= 0 || !is_valid_ptr(a) || l == 0 || b == nullptr) return false;
     kpm.initialize(proc::pid);
     return kpm.write(static_cast<uintptr_t>(a), b, l);
@@ -136,37 +164,50 @@ template<typename T> inline T rpm(uint64_t a) {
     return v;
 }
 
-template<typename T> inline bool wpm(uint64_t a, const T& d) {
-    return mem_write(a, &d, sizeof(T));
-}
-
-// Small-write path with read-back verification. KPM can report a successful
-// prctl while the target value is later overwritten by the game thread, or
-// while a stale engine silently drops the copy. AimRotation is 16 bytes, so
-// the extra read is cheap and gives a real success signal instead of a blind
-// "write returned 0" assumption.
-inline bool mem_write_verified(uint64_t a, const void* b, size_t l) {
+// Small-write path with read-back verification and stack-local rollback.
+// No write happens unless the original bytes were read successfully, and a
+// failed verification restores those exact bytes before returning false.
+inline bool mem_write_verified(uint64_t a, const void* b, size_t l,
+                               const void* knownOriginal = nullptr) {
+    if (!mem_guard::allows(a, l)) return false;
     if (b == nullptr || l == 0) return false;
-    if (!mem_write(a, b, l)) return false;
 
     constexpr size_t kVerifyMax = 64;
-    if (l > kVerifyMax) return true; // large buffers: engine result is the only signal
+    if (l > kVerifyMax) return false; // no silent unverified write path
+
+    uint8_t before[kVerifyMax];
+    if (knownOriginal != nullptr) {
+        std::memcpy(before, knownOriginal, l);
+    } else if (!mem_read(a, before, l)) {
+        return false; // fail closed: unknown original
+    }
+
+    if (!mem_write(a, b, l)) return false;
+
+    auto rollback = [&]() {
+        if (mem_write(a, before, l)) {
+            uint8_t check[kVerifyMax];
+            if (mem_read(a, check, l) && memcmp(check, before, l) == 0) {
+                kpm.diag.rollback_ok++;
+                return;
+            }
+        }
+        kpm.diag.rollback_failed++;
+    };
 
     uint8_t back[kVerifyMax];
     if (!mem_read(a, back, l)) {
         kpm.diag.failed_verified_writes++;
+        rollback();
         return false;
     }
     if (memcmp(back, b, l) != 0) {
         kpm.diag.failed_verified_writes++;
+        rollback();
         return false;
     }
     kpm.diag.verified_writes++;
     return true;
-}
-
-template<typename T> inline bool wpm_verified(uint64_t a, const T& d) {
-    return mem_write_verified(a, &d, sizeof(T));
 }
 
 // Confirm one cached pid still belongs to the target.

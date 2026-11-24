@@ -1,37 +1,80 @@
 #pragma once
 // ============================================================================
-// AIMBOT — EVENT-DRIVEN SMOOTH VIEW LOCK (FREE FIRE MAX)
+// AIMBOT — FOV-GOVERNED HEAD GUIDANCE (FREE FIRE MAX)
 // ============================================================================
-// Project: crack_master
-// Target Platform: com.dts.freefiremax (ARM64-v8a)
-//
-// SYSTEM ARCHITECTURE (NO TIMERS, NO CACHE, NO PRE-WRITE):
-// 1. The thread waits on cfg::g_state_cv. It wakes only when the UI changes a
-//    menu value or the scraper publishes a fresh entity snapshot.
-// 2. Every wake resolves the target from the current snapshot. There is no
-//    sticky rotation cache and no fixed 1 ms / 4 ms write cadence.
-// 3. When Master or Aimbot is OFF, or firing/trigger is inactive, ZERO memory
-//    writes are issued. The game keeps its official view rotation untouched.
-// 4. When active, the view moves from the game's current rotation toward the
-//    target using Quaternion::Slerp. The menu Smooth slider controls the step:
-//    0 = instant, 100 = no movement. It is not a hidden/default behaviour.
-// 5. Only localPlayer + Player_Rotation (0x61C) is written. No enemy collider
-//    or other game state is modified.
+// Player_Rotation (0x61C) is never written. The camera is never locked.
+// AimFov is the only control: the circle decides which enemies get head
+// guidance, and the size of the circle is what the user turns up or down.
 // ============================================================================
 
 #include "common.hpp"
 #include "target.hpp"
 #include "fov.hpp"
 #include "motion.hpp"
+#include "Android_touch/TouchHelperA.h"
 #include <thread>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <cstring>
 
 namespace aimbot {
 
     inline std::atomic<bool> g_aim_running{false};
     inline std::thread       g_aim_thread;
+    constexpr int            kAimTouchSlot = 7;
+
+    // Zero memory writes. The head point inside the AimFov circle is dragged
+    // under the crosshair with a real touch, so the bullet goes to the head
+    // while the camera stays fully under the game's own control.
+    inline void touch_head_guidance(const cfg::RuntimeConfig& rc,
+                                    const TargetAcquisitionResult& acq,
+                                    bool triggerActive) {
+        if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f) {
+            if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
+            return;
+        }
+
+        const float cx = rc.screenW * 0.5f;
+        const float cy = rc.screenH * 0.5f;
+        const float dx = acq.bestScreenPos.x - cx;
+        const float dy = acq.bestScreenPos.y - cy;
+        const float err = sqrtf(dx * dx + dy * dy);
+
+        // AimFov sets the touch strength: a wide circle carries the aim faster,
+        // a narrow circle is a gentle nudge. 180 = full step, 0 = dead.
+        float fovNorm = 1.0f;
+        if (rc.aimFovRadius > 0.0f) {
+            fovNorm = (rc.aimFovRadius - err) / rc.aimFovRadius;
+            if (fovNorm < 0.0f) fovNorm = 0.0f;
+            if (fovNorm > 1.0f) fovNorm = 1.0f;
+        }
+
+        float step = rc.aimPullStepPx * fovNorm;
+        if (!std::isfinite(step) || step < 0.0f) step = 0.0f;
+        if (step > err) step = err;
+        if (step < 0.5f) {
+            if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
+            return;
+        }
+
+        float px = cx, py = cy;
+        if (IsFingerDown(kAimTouchSlot)) {
+            GetFingerScreenPos(kAimTouchSlot, px, py);
+        } else {
+            Touch_Down_Slot(kAimTouchSlot, cx, cy);
+        }
+
+        float nx = px + (dx / err) * step;
+        float ny = py + (dy / err) * step;
+        if (nx < 0.0f || nx > rc.screenW || ny < 0.0f || ny > rc.screenH) {
+            Touch_Up_Slot(kAimTouchSlot);
+            Touch_Down_Slot(kAimTouchSlot, cx, cy);
+            nx = cx + (dx / err) * step;
+            ny = cy + (dy / err) * step;
+        }
+        Touch_Move_Slot(kAimTouchSlot, nx, ny);
+    }
 
     inline void clear_target_snapshot() {
         std::lock_guard<std::mutex> lk(g_targetMutex);
@@ -39,9 +82,6 @@ namespace aimbot {
         g_currentTarget.screenPos = Vector3::Zero();
     }
 
-    // ------------------------------------------------------------------------
-    // REAL-TIME AIM LOOP — driven by real menu/scraper state changes only.
-    // ------------------------------------------------------------------------
     inline void aim_loop() {
         uint64_t lastState = cfg::g_state_generation;
         std::unique_lock<std::mutex> waitLock(cfg::g_runtime_mutex);
@@ -62,6 +102,7 @@ namespace aimbot {
                 ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
 
             if (!active || !is_valid_ptr(localPlayer)) {
+                touch_head_guidance(rc, TargetAcquisitionResult{}, false);
                 clear_target_snapshot();
                 waitLock.lock();
                 continue;
@@ -69,6 +110,8 @@ namespace aimbot {
 
             motion::update(); // Zero-op; motion exploits stay disabled.
 
+            // acquire_target() already drops every enemy outside the AimFov
+            // circle, so the circle itself is the head-carry boundary.
             TargetAcquisitionResult acq = acquire_target(localPlayer);
             {
                 std::lock_guard<std::mutex> lk(g_targetMutex);
@@ -79,55 +122,13 @@ namespace aimbot {
             const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
             const bool triggerActive = (rc.aimTriggerMode == 1) || isFiring;
 
-            if (!triggerActive || !acq.valid || acq.target.headWorld == Vector3::Zero()) {
-                clear_target_snapshot();
-                waitLock.lock();
-                continue;
-            }
-
-            Vector3 cameraPos = GetCameraPosition(data::get_view_matrix());
-            if (cameraPos == Vector3::Zero() || !std::isfinite(cameraPos.x)) {
-                const uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
-                if (localHead != 0) cameraPos = GetNodePosition(localHead);
-            }
-
-            if (cameraPos != Vector3::Zero() && std::isfinite(cameraPos.x)) {
-                const Vector3 targetHead = acq.target.getHeadAimPoint(rc.aimHeadBias);
-                // Vector3::sqrMagnitude()/normalized() are non-const in this
-                // math header, so keep the working direction mutable.
-                Vector3 dir = targetHead - cameraPos;
-
-                if (dir.sqrMagnitude() > 1e-4f && std::isfinite(dir.x)) {
-                    const Quaternion targetRot =
-                        Quaternion::LookRotation(dir.normalized(), Vector3(0, 1, 0));
-
-                    float smooth = rc.aimSmooth;
-                    if (!std::isfinite(smooth)) smooth = 0.0f;
-                    if (smooth < 0.0f) smooth = 0.0f;
-                    if (smooth > 100.0f) smooth = 100.0f;
-
-                    // Smooth = 100 means the user explicitly asked for no
-                    // movement. Do not write at all in that state.
-                    if (smooth < 100.0f) {
-                        Quaternion currentRot =
-                            rpm<Quaternion>(localPlayer + Offsets::Player_Rotation);
-                        if (!std::isfinite(currentRot.x) || !std::isfinite(currentRot.y) ||
-                            !std::isfinite(currentRot.z) || !std::isfinite(currentRot.w) ||
-                            Quaternion::Norm(currentRot) < 1e-5f) {
-                            currentRot = targetRot;
-                        }
-
-                        const float t = 1.0f - (smooth / 100.0f);
-                        const Quaternion blended = Quaternion::Slerp(currentRot, targetRot, t);
-                        wpm_verified(localPlayer + Offsets::Player_Rotation, blended);
-                    }
-                }
-            }
+            touch_head_guidance(rc, acq, triggerActive);
 
             waitLock.lock();
         }
 
         waitLock.unlock();
+        if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
         clear_target_snapshot();
     }
 
@@ -135,9 +136,6 @@ namespace aimbot {
         // Handled by aim_loop on real state-change events.
     }
 
-    // ------------------------------------------------------------------------
-    // THREAD CONTROLS
-    // ------------------------------------------------------------------------
     inline void thread_start() {
         if (g_aim_running.exchange(true)) return;
         g_aim_thread = std::thread(aim_loop);
@@ -147,6 +145,7 @@ namespace aimbot {
         if (!g_aim_running.exchange(false)) return;
         cfg::notify_state_change();
         if (g_aim_thread.joinable()) g_aim_thread.join();
+        if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
         clear_target_snapshot();
     }
 

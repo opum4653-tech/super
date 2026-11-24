@@ -687,12 +687,27 @@ namespace ui::menu {
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Driver Engine & Mode Selection", ui_scale);
 
+                    // One consistent snapshot for the whole telemetry frame.
+                    const int  kpmSelected  = kpm.diag.selected_engine.load();
+                    const int  kpmActive    = kpm.diag.active_engine.load();
+                    const bool kpmConnected = kpm.diag.is_connected.load();
+                    bool       kpmFallback  = kpm.diag.auto_fallback.load();
+                    const int  tbRet        = kpm.diag.tb_ret.load();
+                    const int  tbErrno      = kpm.diag.tb_errno.load();
+                    const bool tbWorks      = kpm.diag.tb_works.load();
+                    const int  neoRet       = kpm.diag.neo_ret.load();
+                    const int  neoResult    = kpm.diag.neo_result.load();
+                    const int  neoErrno     = kpm.diag.neo_errno.load();
+                    const bool neoWorks     = kpm.diag.neo_works.load();
+                    const int  syscallRet   = kpm.diag.syscall_ret.load();
+                    const bool syscallWorks = kpm.diag.syscall_works.load();
+
                     ImGui::Text("Backend Engine:");
                     const char* modeLabels[] = { "AUTO", "TB KPM", "NEO KPM", "SYSCALL" };
                     float btnW = (curWinSize.x - contentPadX * 2.0f - 18.0f * ui_scale) / 4.0f;
                     for (int m = 0; m < 4; m++) {
                         if (m > 0) ImGui::SameLine(0, 6.0f * ui_scale);
-                        bool is_sel = (kpm.diag.selected_engine == m);
+                        bool is_sel = (kpmSelected == m);
                         if (is_sel) {
                             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.8f, 0.2f, 1.0f));
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -701,21 +716,23 @@ namespace ui::menu {
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
                         }
                         if (TouchButton(modeLabels[m], ImVec2(btnW, 36.0f * ui_scale))) {
-                            kpm.diag.selected_engine = m;
+                            kpm.diag.selected_engine.store(m);
                             kpm.test_connection(proc::pid);
                         }
                         ImGui::PopStyleColor(2);
                     }
 
                     ImGui::Dummy(ImVec2(0, 4.0f * ui_scale));
-                    DrawToggleSwitch("Auto Fallback to Syscall", &kpm.diag.auto_fallback, 48.0f * ui_scale, ui_scale);
+                    if (DrawToggleSwitch("Auto Fallback to Syscall", &kpmFallback, 48.0f * ui_scale, ui_scale)) {
+                        kpm.diag.auto_fallback.store(kpmFallback);
+                    }
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Live Kernel & Driver Telemetry", ui_scale);
 
-                    if (kpm.diag.is_connected) {
+                    if (kpmConnected) {
                         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Driver State: CONNECTED");
-                    } else if (kpm.diag.auto_fallback && kpm.diag.active_engine == KPM_ENGINE_SYSCALL) {
+                    } else if (kpmFallback && kpmActive == KPM_ENGINE_SYSCALL) {
                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.0f, 1.0f), "Driver State: SYSCALL FALLBACK (ACTIVE)");
                     } else {
                         ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Driver State: DISCONNECTED (KPM NOT RESPONDING)");
@@ -724,25 +741,25 @@ namespace ui::menu {
                     ImGui::Text("Active Engine: %s", kpm.get_active_engine_name());
 
                     // Detailed TB KPM Diagnostics
-                    if (kpm.diag.tb_ret >= 0 || kpm.diag.tb_works) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "TB KPM (0x63687501): OK (ret=%d, errno=%d)", kpm.diag.tb_ret, kpm.diag.tb_errno);
-                    } else if (kpm.diag.tb_errno == 22) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "TB KPM (0x63687501): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", kpm.diag.tb_ret);
+                    if (tbRet >= 0 || tbWorks) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "TB KPM (0x63687501): OK (ret=%d, errno=%d)", tbRet, tbErrno);
+                    } else if (tbErrno == 22) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "TB KPM (0x63687501): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", tbRet);
                     } else {
-                        ImGui::Text("TB KPM (0x63687501): ret=%d, errno=%d", kpm.diag.tb_ret, kpm.diag.tb_errno);
+                        ImGui::Text("TB KPM (0x63687501): ret=%d, errno=%d", tbRet, tbErrno);
                     }
 
                     // Detailed Neo KPM Diagnostics
-                    if (kpm.diag.neo_ret == 0 && (kpm.diag.neo_result == 0 || kpm.diag.neo_works)) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Neo KPM (0x4E41): OK (ret=%d, res=%d)", kpm.diag.neo_ret, kpm.diag.neo_result);
-                    } else if (kpm.diag.neo_errno == 22) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Neo KPM (0x4E41): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", kpm.diag.neo_ret);
+                    if (neoRet == 0 && (neoResult == 0 || neoWorks)) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Neo KPM (0x4E41): OK (ret=%d, res=%d)", neoRet, neoResult);
+                    } else if (neoErrno == 22) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Neo KPM (0x4E41): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", neoRet);
                     } else {
-                        ImGui::Text("Neo KPM (0x4E41): ret=%d, res=%d, errno=%d", kpm.diag.neo_ret, kpm.diag.neo_result, kpm.diag.neo_errno);
+                        ImGui::Text("Neo KPM (0x4E41): ret=%d, res=%d, errno=%d", neoRet, neoResult, neoErrno);
                     }
 
                     ImGui::Text("Syscall 270: ret=%d [%s]",
-                                kpm.diag.syscall_ret, kpm.diag.syscall_works ? "OK" : "Idle");
+                                syscallRet, syscallWorks ? "OK" : "Idle");
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Target Process & Memory", ui_scale);
@@ -778,13 +795,16 @@ namespace ui::menu {
                                            "Entity Scraper: %zu players in cache", pCount);
                     }
                     ImGui::Text("Reads: %llu total / %llu failed",
-                                (unsigned long long)kpm.diag.total_reads,
-                                (unsigned long long)kpm.diag.failed_reads);
+                                (unsigned long long)kpm.diag.total_reads.load(),
+                                (unsigned long long)kpm.diag.failed_reads.load());
                     ImGui::Text("Writes: %llu total / %llu failed | Verified: %llu / %llu bad",
-                                (unsigned long long)kpm.diag.total_writes,
-                                (unsigned long long)kpm.diag.failed_writes,
-                                (unsigned long long)kpm.diag.verified_writes,
-                                (unsigned long long)kpm.diag.failed_verified_writes);
+                                (unsigned long long)kpm.diag.total_writes.load(),
+                                (unsigned long long)kpm.diag.failed_writes.load(),
+                                (unsigned long long)kpm.diag.verified_writes.load(),
+                                (unsigned long long)kpm.diag.failed_verified_writes.load());
+                    ImGui::Text("Rollback: %llu ok / %llu failed",
+                                (unsigned long long)kpm.diag.rollback_ok.load(),
+                                (unsigned long long)kpm.diag.rollback_failed.load());
                     ImGui::Text("Resolved: match=0x%llx dict=0x%llx dictN=%d enemies=%d",
                                 (unsigned long long)data::selectedMatchAddr.load(),
                                 (unsigned long long)data::selectedDictAddr.load(),
@@ -880,25 +900,23 @@ namespace ui::menu {
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
-                    DrawSectionHeader(cdl, "FOV & Target Settings", ui_scale);
+                    DrawSectionHeader(cdl, "AimFov - Head Carry", ui_scale);
 
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##AimFov", &cfg::aim::aim_fov, 0.0f, 180.0f, "%.0f deg");
-                    ImGui::TextDisabled("AimFov (0 - 180)");
+                    ImGui::TextDisabled("Raise = bigger circle = bullets carried to the head");
+
+                    ImGui::TextDisabled("Official game range only - no code-side distance filter.");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 0.0f, 100.0f, "%.0f%%");
-                    ImGui::TextDisabled("Aim Smooth (0 = instant, 100 = no movement)");
+                    ImGui::SliderFloat("##PullStep", &cfg::aim::pull_step_px, 1.0f, 40.0f, "%.0f px");
+                    ImGui::TextDisabled("Pull Step (touch drag strength inside the circle)");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat("##HeadBias", &cfg::aim::head_bias, -0.5f, 0.5f, "%.2f m");
                     ImGui::TextDisabled("Head Aim Offset (menu-controlled)");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Range: Official Game Range (Uncapped)");
-                    ImGui::TextDisabled("Tracks all active targets within official game visibility.");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* triggerModes[] = { "When Firing", "Always In FOV" };
@@ -913,8 +931,8 @@ namespace ui::menu {
                     ImGui::TextDisabled("Target Priority Mode");
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX (menu-controlled smooth head lock)");
-                    ImGui::TextDisabled("AimRotation is written only while the trigger is active and a target is live.");
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX official range, head only");
+                    ImGui::TextDisabled("No camera write, no aim lock. Official lock stays in charge.");
                 }
                 // ============================================================
                 // TAB 3: MOTION (ANTI-BAN PROTECTED)

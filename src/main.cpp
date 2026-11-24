@@ -228,10 +228,9 @@ static int start_overlay() {
         auto now = std::chrono::steady_clock::now();
         float dt = std::chrono::duration<float>(now - last_frame_time).count();
         last_frame_time = now;
+        // Real frame delta only; no artificial time constant fallback.
         if (dt > 0.0f && dt < 0.1f) {
             global_anim_time += dt;
-        } else {
-            global_anim_time += 0.016f;
         }
 
         drawBegin();            // Prepares new ImGui frame & polls orientation

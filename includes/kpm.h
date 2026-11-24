@@ -8,6 +8,7 @@
 // with live diagnostics, manual engine selection, and safe syscall fallback.
 // ============================================================================
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -81,35 +82,37 @@ enum EKpmEngine {
 };
 
 struct KpmDiagnostics {
-    int  selected_engine = KPM_ENGINE_AUTO;
-    int  active_engine   = KPM_ENGINE_AUTO;
-    bool is_connected    = false;
-    bool auto_fallback   = false; // Menu-controlled only; never enabled by default
+    std::atomic<int>  selected_engine{KPM_ENGINE_AUTO};
+    std::atomic<int>  active_engine{KPM_ENGINE_AUTO};
+    std::atomic<bool> is_connected{false};
+    std::atomic<bool> auto_fallback{false}; // Menu-controlled only; never enabled by default
 
     // TB KPM Probe & Test
-    int  tb_ret          = -999;
-    int  tb_errno        = 0;
-    bool tb_works        = false;
+    std::atomic<int>  tb_ret{-999};
+    std::atomic<int>  tb_errno{0};
+    std::atomic<bool> tb_works{false};
 
     // Neo KPM Probe & Test
-    int  neo_ret         = -999;
-    int  neo_errno       = 0;
-    int  neo_result      = -999;
-    bool neo_works       = false;
+    std::atomic<int>  neo_ret{-999};
+    std::atomic<int>  neo_errno{0};
+    std::atomic<int>  neo_result{-999};
+    std::atomic<bool> neo_works{false};
 
     // Syscall Test
-    int  syscall_ret     = -999;
-    bool syscall_works   = false;
+    std::atomic<int>  syscall_ret{-999};
+    std::atomic<bool> syscall_works{false};
 
     // Counters
-    uint64_t total_reads          = 0;
-    uint64_t failed_reads         = 0;
-    uint64_t total_writes         = 0;
-    uint64_t failed_writes        = 0;
-    uint64_t verified_writes      = 0;
-    uint64_t failed_verified_writes = 0;
-    uint32_t last_magic           = 0;
-    char status_str[128]          = "Initializing...";
+    std::atomic<uint64_t> total_reads{0};
+    std::atomic<uint64_t> failed_reads{0};
+    std::atomic<uint64_t> total_writes{0};
+    std::atomic<uint64_t> failed_writes{0};
+    std::atomic<uint64_t> verified_writes{0};
+    std::atomic<uint64_t> failed_verified_writes{0};
+    std::atomic<uint64_t> rollback_ok{0};
+    std::atomic<uint64_t> rollback_failed{0};
+    std::atomic<uint32_t> last_magic{0};
+    char status_str[128] = "Initializing...";
 };
 
 class c_kpm {
@@ -132,7 +135,6 @@ public:
         diag.tb_ret = (int)r;
         diag.tb_errno = errno;
         if (r >= 0) {
-            diag.tb_works = true;
             return true;
         }
         // Fallback try standard libc prctl wrapper
@@ -141,7 +143,6 @@ public:
         diag.tb_ret = (int)r;
         diag.tb_errno = errno;
         if (r >= 0) {
-            diag.tb_works = true;
             return true;
         }
         return false;
@@ -284,6 +285,9 @@ public:
     void test_connection(pid_t target_pid = -1) {
         if (target_pid <= 0) target_pid = this->pid;
         if (target_pid <= 0) target_pid = getpid();
+        if (target_pid > 0 && target_pid != getpid() && this->pid != target_pid) {
+            initialize(target_pid);
+        }
 
         // 1. Test TB KPM with self
         volatile uint32_t test_val = 0x5A5A1234;
@@ -295,15 +299,20 @@ public:
         diag.tb_errno = errno;
         diag.tb_works = (r >= 0 && read_buf == test_val);
 
-        // If target pid is available, also test real target memory
+        // If the self-canary failed, require a verified ELF magic read from the
+        // real target. A bare r >= 0 is NOT proof that TB KPM copied anything.
         if (!diag.tb_works && target_pid > 0 && target_pid != getpid()) {
-            uint32_t dummy = 0;
-            struct mem_operation op2 = { target_pid, 0x10000, &dummy, sizeof(dummy) };
-            errno = 0;
-            long r2 = syscall(__NR_prctl, PRCTL_MEM_READ, (unsigned long)&op2, 0, 0, 0);
-            diag.tb_ret = (int)r2;
-            diag.tb_errno = errno;
-            if (r2 >= 0) diag.tb_works = true;
+            uintptr_t base = parse_maps_module_base("libil2cpp.so");
+            if (base != 0) {
+                uint32_t magic = 0;
+                struct mem_operation op2 = { target_pid, (uint64_t)base, &magic, sizeof(magic) };
+                errno = 0;
+                long r2 = syscall(__NR_prctl, PRCTL_MEM_READ, (unsigned long)&op2, 0, 0, 0);
+                diag.tb_ret = (int)r2;
+                diag.tb_errno = errno;
+                diag.tb_works = (r2 >= 0 && magic == 0x464C457F);
+                if (diag.tb_works) diag.last_magic = magic;
+            }
         }
 
         // 2. Test Neo KPM
@@ -330,17 +339,23 @@ public:
             diag.syscall_works = (sr > 0 || (sr < 0 && errno == EFAULT));
         }
 
-        // 4. Update status summary string
-        if (diag.tb_works) {
+        // 4. Update status summary string. Only a probe for the engine the
+        //    user actually selected may open the write gate.
+        const int selected = diag.selected_engine.load();
+        const bool tbAllowed = (selected == KPM_ENGINE_AUTO || selected == KPM_ENGINE_TB);
+        const bool neoAllowed = (selected == KPM_ENGINE_AUTO || selected == KPM_ENGINE_NEO);
+        if (diag.tb_works && tbAllowed) {
             snprintf(diag.status_str, sizeof(diag.status_str), "TB KPM Active (prctl 0x63687501)");
             diag.is_connected = true;
-            if (diag.selected_engine == KPM_ENGINE_AUTO) diag.active_engine = KPM_ENGINE_TB;
-        } else if (diag.neo_works) {
+            if (selected == KPM_ENGINE_AUTO) diag.active_engine = KPM_ENGINE_TB;
+        } else if (diag.neo_works && neoAllowed) {
             snprintf(diag.status_str, sizeof(diag.status_str), "Neo KPM Active (prctl 0x4E41)");
             diag.is_connected = true;
-            if (diag.selected_engine == KPM_ENGINE_AUTO) diag.active_engine = KPM_ENGINE_NEO;
+            if (selected == KPM_ENGINE_AUTO) diag.active_engine = KPM_ENGINE_NEO;
         } else {
-            snprintf(diag.status_str, sizeof(diag.status_str), "KPM Not Responding (TB:%d, Neo:%d)", diag.tb_errno, diag.neo_errno);
+            snprintf(diag.status_str, sizeof(diag.status_str),
+                     "KPM Not Responding (TB:%d, Neo:%d)",
+                     diag.tb_errno.load(), diag.neo_errno.load());
             diag.is_connected = false;
             if (diag.auto_fallback) diag.active_engine = KPM_ENGINE_SYSCALL;
         }
@@ -362,6 +377,10 @@ public:
         this->pid = target_pid;
         diag.active_engine = KPM_ENGINE_AUTO;
         diag.is_connected  = false;
+        diag.tb_works      = false;
+        diag.neo_works     = false;
+        diag.syscall_works = false;
+        diag.last_magic    = 0;
     }
 
     void set_pid(pid_t target_pid) {
@@ -458,7 +477,14 @@ public:
 
         bool ok = false;
         int mode = diag.selected_engine;
-        if (mode == KPM_ENGINE_AUTO) mode = diag.active_engine;
+        if (mode == KPM_ENGINE_AUTO) {
+            mode = diag.active_engine;
+            // A stale SYSCALL active_engine from a previous session must not
+            // authorize writes while auto-fallback is off in the menu.
+            if (mode == KPM_ENGINE_SYSCALL && !diag.auto_fallback) {
+                mode = KPM_ENGINE_AUTO;
+            }
+        }
 
         if (mode == KPM_ENGINE_TB) {
             ok = tb_kpm_write(this->pid, addr, buffer, size);
