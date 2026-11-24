@@ -486,18 +486,20 @@ namespace data {
                 maxHP = 200;
             }
 
+            bool visible = true;
             auto avatarMgr = span.at<uint64_t>(Offsets::Player_Avatar);
-            if (!avatarMgr) continue;
-            auto uma = rpm<uint64_t>(avatarMgr + Offsets::Avatar_Uma);
-            if (!uma) continue;
+            if (avatarMgr) {
+                auto uma = rpm<uint64_t>(avatarMgr + Offsets::Avatar_Uma);
+                if (uma) {
+                    visible = rpm<bool>(uma + Offsets::Uma_Visible);
 
-            bool visible = rpm<bool>(uma + Offsets::Uma_Visible);
-
-            // Zero-overhead filtering: drop teammates & local user
-            auto umaData = rpm<uint64_t>(uma + Offsets::Uma_Data);
-            if (umaData) {
-                if (rpm<bool>(umaData + Offsets::Avatar::UmaData_Teammate)) continue;
-                if (rpm<bool>(umaData + Offsets::Avatar::UmaData_LocalPlayer)) continue;
+                    // Zero-overhead filtering: drop teammates & local user
+                    auto umaData = rpm<uint64_t>(uma + Offsets::Uma_Data);
+                    if (umaData) {
+                        if (rpm<bool>(umaData + Offsets::Avatar::UmaData_Teammate)) continue;
+                        if (rpm<bool>(umaData + Offsets::Avatar::UmaData_LocalPlayer)) continue;
+                    }
+                }
             }
 
             // Head 3D World Position
