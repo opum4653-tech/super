@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "kpm.h"
+#include "../offsets/offsets.hpp"
 #include "../protect/oxorany.hpp"
 
 namespace proc {
@@ -118,24 +119,23 @@ inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
 
 // Default-deny write guard. The caller must open a short-lived Scope for the
 // exact address/size it intends to write. No gameplay state may be written
-// outside that scope; the scope is stack-local and never persisted.
+// outside that scope; the scope is thread-local, stack-bound, and never persisted.
 namespace mem_guard {
-    inline std::atomic<uint64_t> allowed_addr{0};
-    inline std::atomic<size_t>   allowed_size{0};
+    inline thread_local uint64_t allowed_addr = 0;
+    inline thread_local size_t   allowed_size = 0;
 
     inline bool allows(uint64_t a, size_t l) {
-        return allowed_addr.load(std::memory_order_relaxed) == a &&
-               allowed_size.load(std::memory_order_relaxed) == l;
+        return allowed_addr == a && allowed_size == l;
     }
 
     struct Scope {
         Scope(uint64_t a, size_t l) {
-            allowed_addr.store(a, std::memory_order_relaxed);
-            allowed_size.store(l, std::memory_order_relaxed);
+            allowed_addr = a;
+            allowed_size = l;
         }
         ~Scope() {
-            allowed_addr.store(0, std::memory_order_relaxed);
-            allowed_size.store(0, std::memory_order_relaxed);
+            allowed_addr = 0;
+            allowed_size = 0;
         }
         Scope(const Scope&) = delete;
         Scope& operator=(const Scope&) = delete;
@@ -461,11 +461,11 @@ inline uint64_t get_lib() {
     for (int i = 0; i < candCount; i++) {
         uint64_t cand = candidates[i];
         if (cand == 0) continue;
-        uint64_t gf1 = rpm<uint64_t>(cand + 0xAD68E18); // maxff.h primary
+        uint64_t gf1 = rpm<uint64_t>(cand + Offsets::Base::GameFacade);
         if (gf1 > 0x10000000) {
             return cand;
         }
-        uint64_t gf2 = rpm<uint64_t>(cand + 0xAD6DC18); // STORM_MODS alt
+        uint64_t gf2 = rpm<uint64_t>(cand + Offsets::Base::GameFacade_Alt);
         if (gf2 > 0x10000000) {
             return cand;
         }

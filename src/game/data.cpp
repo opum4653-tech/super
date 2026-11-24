@@ -5,7 +5,7 @@
 //
 // ARCHITECTURAL OVERVIEW:
 // 1. Base Chain Resolution:
-//    Traverses GameFacade (0xA72E4E0) -> StaticFields (0xB8) -> BaseGame (0x8) -> Match (0x90).
+//    Traverses GameFacade (0xAD68E18) -> StaticFields (0xB8) -> BaseGame (0x8) -> Match (0x90).
 // 2. Camera ViewMatrix Resolution (pewpew-grade multi-candidate fallbacks):
 //    - Candidate 1: LocalPlayer -> FollowCamera (0x690) -> Camera (0x28) -> IntPtr (0x10) -> Matrix (0x100)
 //    - Candidate 2: LocalPlayer -> FollowCamera (0x690) -> 0x30 -> 0x10 -> Matrix (0x100)
@@ -254,8 +254,13 @@ namespace data {
         MonoDictionary dict(dictPtr);
         if (!dict.valid) return;
 
+        MonoDictionary::EntryBlock blk{};
+        bool blockOk = false;
         for (int i = 0; i < dict.count; i++) {
-            uint64_t dropObj = dict.entry(i);
+            if (i % MonoDictionary::kBlockSize == 0) {
+                blockOk = dict.read_block(i, blk);
+            }
+            uint64_t dropObj = blockOk ? blk.value[i % MonoDictionary::kBlockSize] : dict.entry(i);
             if (!dropObj || dropObj < 0x100000) continue;
 
             bool landed = rpm<bool>(dropObj + Offsets::DropObject_Landed);
@@ -412,14 +417,6 @@ namespace data {
                 std::lock_guard<std::mutex> lk(loots_mutex);
                 if (!loots.empty()) loots.clear();
             }
-            return;
-        }
-
-        if (!m_Match) {
-            set_scrape_ready(false);
-            clear_resolution_telemetry();
-            std::lock_guard<std::mutex> lk(players_mutex);
-            players.clear();
             return;
         }
 
@@ -747,7 +744,13 @@ namespace data {
     static void loop() {
         while (g_run.load(std::memory_order_relaxed)) {
             update();
-            sched_yield();
+            if (proc::pid <= 0 || proc::lib == 0 ||
+                !cfg::runtime().anyFeature ||
+                !inMatch.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            } else {
+                sched_yield();
+            }
         }
     }
 

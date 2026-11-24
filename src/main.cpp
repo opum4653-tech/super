@@ -201,7 +201,7 @@ static int start_overlay() {
                         aimbot::thread_start();
 
                         // Exit the active session the moment the target PID
-                        // disappears. No timed polling window.
+                        // disappears, with bounded sleep to avoid busy-spinning.
                         while (main_thread_flag) {
                             if (proc::pid <= 0 || ::kill(proc::pid, 0) != 0) {
                                 aimbot::thread_stop();
@@ -209,12 +209,12 @@ static int start_overlay() {
                                 proc::pid_cache = 0;
                                 break;
                             }
-                            std::this_thread::yield();
+                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
                         }
                     }
                 }
             }
-            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
     });
     attach_worker.detach();
@@ -250,19 +250,14 @@ static int start_overlay() {
 }
 
 // ----------------------------------------------------------------------------
-// EMERGENCY CLEANUP TRAP (SIGNAL SAFETY & REVERSE STATE INTEGRITY)
+// EMERGENCY CLEANUP TRAP (ASYNC-SIGNAL-SAFE EXIT FLAG)
 // ----------------------------------------------------------------------------
-// Triggered on SIGINT, SIGTERM, SIGHUP. Guarantees that system settings
-// (block_untrusted_touches) and virtual uinput nodes are ALWAYS restored,
-// leaving zero lingering footprint on Android OS even if killed externally.
+// Triggered on SIGINT, SIGTERM, SIGHUP. Only flips the atomic loop flag so the
+// main render loop exits cleanly and runs symmetrical teardown without calling
+// mutexes or thread::join() inside a signal handler (prevents deadlocks).
 static void emergency_cleanup(int sig) {
     (void)sig;
-    main_thread_flag = false;
-    settings_guard::restore();
-    Touch_Close();
-    aimbot::thread_stop();
-    data::thread_stop();
-    _exit(0);
+    main_thread_flag.store(false, std::memory_order_relaxed);
 }
 
 // ----------------------------------------------------------------------------

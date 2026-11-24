@@ -33,6 +33,7 @@
 #include <sys/syscall.h>
 #include <sys/system_properties.h>
 #include <curl/curl.h>
+#include "json.hpp"
 #include "../protect/oxorany.hpp"
 
 #ifndef MFD_CLOEXEC
@@ -312,17 +313,8 @@ namespace lic {
             return false;
         };
 
-        // 1. Standard HTTPS with CA bundle
+        // Strict HTTPS with CA verification only (no insecure TLS or plaintext HTTP downgrade)
         executed = perform_request(server_url, false);
-        // 2. Fallback HTTPS without strict CA check
-        if (!executed) {
-            executed = perform_request(server_url, true);
-        }
-        // 3. Fallback HTTP if HTTPS port is blocked
-        if (!executed && server_url.rfind("https://", 0) == 0) {
-            std::string http_url = "http://" + server_url.substr(8);
-            executed = perform_request(http_url, true);
-        }
 
         if (!executed || strlen(response) == 0) {
             printf("[-] Authentication failed: Network error - unable to connect to license server.\n");
@@ -330,58 +322,65 @@ namespace lic {
             return false;
         }
 
-        // Match status: true (api_config.json §license.response_success)
-        bool status_ok = (strstr(response, "\"status\":true") != nullptr)
-                      || (strstr(response, "\"status\": true") != nullptr)
-                      || (strstr(response, "\"status\":\"true\"") != nullptr)
-                      || (strstr(response, "\"status\": \"true\"") != nullptr)
-                      || (strstr(response, "\"status\":\"success\"") != nullptr);
+        auto j = nlohmann::json::parse(response, nullptr, false);
+        if (j.is_discarded() || !j.is_object()) {
+            printf("[-] Authentication failed: Invalid server response.\n");
+            fflush(stdout);
+            s_is_valid = false;
+            return false;
+        }
+
+        // Match status: true / "true" / "success" (api_config.json §license.response_success)
+        bool status_ok = false;
+        if (j.contains("status")) {
+            const auto& st = j["status"];
+            if (st.is_boolean()) {
+                status_ok = st.get<bool>();
+            } else if (st.is_string()) {
+                const std::string s = st.get<std::string>();
+                status_ok = (s == "true" || s == "success");
+            }
+        }
 
         if (status_ok) {
             time_t now = time(nullptr);
             time_t expiry_ts = 0;
 
             // Flexible parse of expired_date ("Y-m-d H:i:s" UTC+6)
-            const char* expPtr = strstr(response, "\"expired_date\"");
-            if (expPtr) {
-                const char* colon = strchr(expPtr + 14, ':');
-                if (colon) {
-                    const char* q1 = strchr(colon, '"');
-                    if (q1) {
-                        int yr = 0, mo = 0, dy = 0, hr = 0, mi = 0, sc = 0;
-                        if (sscanf(q1 + 1, "%d-%d-%d %d:%d:%d", &yr, &mo, &dy, &hr, &mi, &sc) == 6
-                            && yr >= 2024 && mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
+            if (j.contains("expired_date") && j["expired_date"].is_string()) {
+                const std::string expStr = j["expired_date"].get<std::string>();
+                int yr = 0, mo = 0, dy = 0, hr = 0, mi = 0, sc = 0;
+                if (sscanf(expStr.c_str(), "%d-%d-%d %d:%d:%d", &yr, &mo, &dy, &hr, &mi, &sc) == 6
+                    && yr >= 2024 && mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) {
 
-                            static const int kDays[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
-                            long days = 0;
-                            for (int y = 1970; y < yr; ++y) {
-                                bool leap = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
-                                days += leap ? 366 : 365;
-                            }
-                            bool is_leap = (yr % 4 == 0 && (yr % 100 != 0 || yr % 400 == 0));
-                            for (int m = 1; m < mo; ++m) {
-                                days += kDays[m];
-                                if (m == 2 && is_leap) days += 1;
-                            }
-                            days += dy - 1;
-
-                            // Convert UTC+6 -> UTC (-21600 seconds)
-                            expiry_ts = (time_t)(days * 86400LL + hr * 3600LL + mi * 60LL + sc - 21600LL);
-                        }
+                    static const int kDays[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+                    long days = 0;
+                    for (int y = 1970; y < yr; ++y) {
+                        bool leap = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+                        days += leap ? 366 : 365;
                     }
+                    bool is_leap = (yr % 4 == 0 && (yr % 100 != 0 || yr % 400 == 0));
+                    for (int m = 1; m < mo; ++m) {
+                        days += kDays[m];
+                        if (m == 2 && is_leap) days += 1;
+                    }
+                    days += dy - 1;
+
+                    // Convert UTC+6 -> UTC (-21600 seconds)
+                    expiry_ts = (time_t)(days * 86400LL + hr * 3600LL + mi * 60LL + sc - 21600LL);
                 }
             }
 
             // Fallback: remaining_seconds field
-            if (expiry_ts == 0) {
-                const char* remPtr = strstr(response, "\"remaining_seconds\"");
-                if (remPtr) {
-                    const char* colon = strchr(remPtr + 19, ':');
-                    if (colon) {
-                        long parsed = atol(colon + 1);
-                        if (parsed > 0) expiry_ts = now + parsed;
-                    }
+            if (expiry_ts == 0 && j.contains("remaining_seconds")) {
+                long parsed = 0;
+                const auto& rs = j["remaining_seconds"];
+                if (rs.is_number_integer()) {
+                    parsed = rs.get<long>();
+                } else if (rs.is_string()) {
+                    parsed = atol(rs.get<std::string>().c_str());
                 }
+                if (parsed > 0) expiry_ts = now + parsed;
             }
 
             // Per api_config.json rule 42: "App must treat status=true as logged in"
@@ -398,29 +397,16 @@ namespace lic {
         }
 
         // Error handling: api_config.json §license.response_error uses "reason"
-        char errMsg[256] = {0};
-        const char* errPtr = strstr(response, "\"reason\"");
-        if (!errPtr) errPtr = strstr(response, "\"message\"");
-        if (!errPtr) errPtr = strstr(response, "\"error\"");
-
-        if (errPtr) {
-            const char* colon = strchr(errPtr, ':');
-            if (colon) {
-                const char* q1 = strchr(colon, '"');
-                if (q1) {
-                    const char* q2 = strchr(q1 + 1, '"');
-                    if (q2) {
-                        size_t elen = static_cast<size_t>(q2 - (q1 + 1));
-                        if (elen > sizeof(errMsg) - 1) elen = sizeof(errMsg) - 1;
-                        strncpy(errMsg, q1 + 1, elen);
-                        errMsg[elen] = '\0';
-                    }
-                }
+        std::string errMsg;
+        for (const char* field : {"reason", "message", "error"}) {
+            if (j.contains(field) && j[field].is_string()) {
+                errMsg = j[field].get<std::string>();
+                if (!errMsg.empty()) break;
             }
         }
 
-        if (errMsg[0] != '\0') {
-            printf("[-] Authentication failed: %s\n", errMsg);
+        if (!errMsg.empty()) {
+            printf("[-] Authentication failed: %s\n", errMsg.c_str());
         } else {
             printf("[-] Authentication failed: Invalid or expired API token.\n");
         }

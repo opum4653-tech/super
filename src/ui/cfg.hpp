@@ -213,9 +213,10 @@ inline void publish_runtime() {
         s.aimFovRadius = (g_sw > 0.0f) ? (g_sw * 0.25f) : 250.0f;
     }
 
-    const bool changed = !s.equals(g_runtime_snapshot);
+    bool changed = false;
     {
         std::lock_guard<std::mutex> lk(g_runtime_mutex);
+        changed = !s.equals(g_runtime_snapshot);
         g_runtime_snapshot = s;
         if (changed) ++g_state_generation;
     }
