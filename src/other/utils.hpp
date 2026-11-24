@@ -40,27 +40,47 @@ public:
     explicit MonoDictionary(uint64_t addr) : address(addr), entries_head(0), count(0), valid(false) {
         if (!addr_valid(addr)) return;
 
-        struct { uint64_t entries; uint64_t count_and_pad; } header{};
-        if (!mem_read(addr + 0x18, &header, sizeof(header))) return;
+        // 1. STORM_MODS / Free Fire Max proven layout:
+        //    Dictionary (+0x28) -> values (monoArray<V>*)
+        //    values (+0x18) -> length (count)
+        //    values (+0x20) -> vector elements start (stride = 0x18)
+        uint64_t valuesArray = rpm<uint64_t>(addr + 0x28);
+        if (addr_valid(valuesArray)) {
+            int len = rpm<int>(valuesArray + 0x18);
+            if (len > 0 && len <= 200) {
+                entries_head = valuesArray + 0x20;
+                count = len;
+                valid = true;
+                return;
+            }
+        }
 
-        if (!addr_valid(header.entries)) return;
-
-        entries_head = header.entries + 0x20;               // skip il2cpp array header
-        count        = static_cast<int>(header.count_and_pad & 0xFFFFFFFFu);
-        valid        = (count > 0 && count < 0x1000);
+        // 2. Alternative layout (.NET Core / IL2CPP Entry[] array):
+        //    Dictionary (+0x18) -> entries (Entry[] array)
+        //    Dictionary (+0x20) or entries (+0x18) -> count
+        uint64_t entriesArray = rpm<uint64_t>(addr + 0x18);
+        if (addr_valid(entriesArray)) {
+            int len = rpm<int>(addr + 0x20);
+            if (len <= 0 || len > 200) {
+                len = rpm<int>(entriesArray + 0x18);
+            }
+            if (len > 0 && len <= 200) {
+                entries_head = entriesArray + 0x20;
+                count = len;
+                valid = true;
+                return;
+            }
+        }
     }
 
     inline uint64_t getValues()   const { return entries_head; }
     inline int      getNumValues() const { return count; }
 
-    // ReplicationEntity* de uma entry — validate hashCode & key to eliminate ghost/dead entries
+    // ReplicationEntity* de uma entry — matches STORM_MODS entry resolution
     inline uint64_t entry(int i) const {
         if (!valid || i < 0 || i >= count) return 0;
-        int hashCode = rpm<int>(entries_head + i * 0x18);
-        if (hashCode < 0) return 0; // Slot is empty or deleted in il2cpp Dictionary
-        uint64_t key = rpm<uint64_t>(entries_head + i * 0x18 + 0x08);
-        if (!key) return 0;
-        return rpm<uint64_t>(entries_head + i * 0x18 + 0x10);
+        uint64_t val = rpm<uint64_t>(entries_head + i * 0x18 + 0x10);
+        return (addr_valid(val)) ? val : 0;
     }
 
     // The entries array is contiguous, so a run of them is one read instead of
@@ -96,8 +116,8 @@ public:
         }
 
         for (int i = 0; i < n; i++) {
-            // Same acceptance rule as entry(): reject empty slots and dead keys.
-            out.value[i] = (raw[i].hash < 0 || raw[i].key == 0) ? 0 : raw[i].value;
+            // Validate value pointer (must be valid 64-bit userland heap address)
+            out.value[i] = (addr_valid(raw[i].value)) ? raw[i].value : 0;
         }
         out.count = n;
         return true;

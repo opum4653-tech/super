@@ -695,7 +695,14 @@ namespace ui::menu {
                         std::lock_guard<std::mutex> lk(data::players_mutex);
                         pCount = data::players.size();
                     }
-                    ImGui::Text("Entity Scraper: %zu players in cache", pCount);
+                    if (!cfg::master_enabled) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Entity Scraper: Standby (Master Switch is OFF)");
+                    } else if (!data::inMatch.load()) {
+                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Entity Scraper: Waiting for Match (In Lobby)");
+                    } else {
+                        ImGui::TextColored(pCount > 0 ? ImVec4(0.0f, 1.0f, 0.4f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                                           "Entity Scraper: %zu players in cache", pCount);
+                    }
                     ImGui::Text("Reads: %llu total / %llu failed",
                                 (unsigned long long)kpm.diag.total_reads,
                                 (unsigned long long)kpm.diag.failed_reads);

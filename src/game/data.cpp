@@ -432,15 +432,19 @@ namespace data {
             loots.clear();
         }
 
-        // 5. Enemy Players Dictionary Traversal
+        // 5. Enemy Players Dictionary Traversal (Candidates: 0xC0 and 0xC8 from maxff.h)
         uint64_t dictAddr = rpm<uint64_t>(BaseGame + Offsets::Match_PlayerDict);
-        if (!dictAddr) {
-            std::lock_guard<std::mutex> lk(players_mutex);
-            players.clear();
-            return;
+        MonoDictionary dict(dictAddr);
+        if (!dict.valid) {
+            uint64_t altDict = rpm<uint64_t>(BaseGame + 0xC8); // LDictionaryEntities
+            if (altDict && altDict != dictAddr) {
+                MonoDictionary dict2(altDict);
+                if (dict2.valid) {
+                    dict = dict2;
+                }
+            }
         }
 
-        MonoDictionary dict(dictAddr);
         if (!dict.valid) {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
