@@ -59,7 +59,7 @@ namespace esp {
 }
 
 namespace aim {
-    inline bool  enable           = false; // Target Lock Reticle (Visual Assist, Zero Fake Damage)
+    inline bool  enable           = false; // Aimbot Headshot Lock (Free Fire MAX)
     inline bool  show_fov         = false; // Render FOV Circle
     inline float aim_fov          = 90.0f;  // Default 90 deg acquisition FOV
     inline float fov_radius       = 200.0f; // Default 200px screen radius

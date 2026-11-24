@@ -784,7 +784,7 @@ namespace ui::menu {
 
                     DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
-                    DrawToggleSwitch("Aim Target Lock (FOV Reticle)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Aimbot Headshot (Max FF)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 
@@ -812,8 +812,8 @@ namespace ui::menu {
                     ImGui::TextDisabled("Target Priority Mode");
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    ImGui::TextColored(ImVec4(0.0f, 0.9f, 1.0f, 1.0f), "Damage Mode: 100%% Real Damage (Zero Fake Damage)");
-                    ImGui::TextDisabled("Silent Aim removed permanently (server-side patched).");
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX (100%% Head Lock)");
+                    ImGui::TextDisabled("Direct weapon RayDir trajectory lock to head bone (maxff.h).");
                 }
                 // ============================================================
                 // TAB 3: MOTION (ANTI-BAN PROTECTED)

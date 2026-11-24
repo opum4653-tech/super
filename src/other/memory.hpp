@@ -173,8 +173,7 @@ inline bool pid_alive(int pid) {
     bool ok = false;
     if (b > 0) {
         cmd[b] = '\0';
-        ok = (strstr(cmd, oxorany("com.dts.freefiremax")) != nullptr ||
-              strstr(cmd, oxorany("com.dts.freefireth"))  != nullptr);
+        ok = (strstr(cmd, oxorany("com.dts.freefiremax")) != nullptr);
         wipe(cmd, sizeof(cmd));
     }
     return ok;
@@ -194,9 +193,6 @@ inline int get_pid() {
 
     // Direct Neo KPM PID query if available (from pewpew)
     pid_t neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefiremax"));
-    if (neo_pid <= 0) {
-        neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefireth"));
-    }
     if (neo_pid > 0) {
         proc::pid_cache = neo_pid;
         kpm.initialize(neo_pid);
@@ -246,8 +242,7 @@ inline int get_pid() {
 
                         if (b > 0) {
                             cmd[b] = '\0';
-                            if (strstr(cmd, oxorany("com.dts.freefiremax")) ||
-                                strstr(cmd, oxorany("com.dts.freefireth"))) {
+                            if (strstr(cmd, oxorany("com.dts.freefiremax"))) {
                                 found = pid;
                             }
                             wipe(cmd, sizeof(cmd));

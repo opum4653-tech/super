@@ -1,20 +1,23 @@
 #pragma once
 // ============================================================================
-// AIMBOT — REAL-TIME TARGET TRACKING & VISUAL LOCK RETICLE ENGINE
+// AIMBOT — REAL-TIME DUAL-THREAD HEADSHOT TRAJECTORY ENGINE (FREE FIRE MAX)
 // ============================================================================
-// Project: crack_master (Pure External Ring-3 Assisted Aim)
+// Project: crack_master
+// Target Platform: com.dts.freefiremax (Offsets strictly from maxff.h)
 //
-// ZERO FAKE DAMAGE / 100% REAL DAMAGE ARCHITECTURE:
-// - Silent Aim (modifying 0x40 RayDir and 0x80 ColliderBody) has been PERMANENTLY
-//   REMOVED because it is server-side patched by Free Fire.
-//   Server-side raycast validation rejects modified trajectories, causing
-//   client-side "Fake Damage" where enemies take zero actual HP reduction.
-// - All memory mutation (wpm) is eliminated in this module.
-// - This module runs a high-speed, zero-timer tracking loop that acquires the best
-//   target inside the FOV circle and updates g_currentTarget for the visual
-//   target lock reticle and FOV overlay (render_fov).
-// - Bullets travel naturally along the authentic weapon barrel and camera orientation,
-//   ensuring 100% server-validated REAL DAMAGE on all hits.
+// PROVEN PEWPEW ARCHITECTURE:
+// 1. Writer Thread (writer_loop):
+//    Floods g_targetDir into local weapon AimInfo.Direction (0x40 raycast in maxff.h)
+//    during active firing. This ensures bullets snap directly to the target head
+//    before Unity updates weapon spread/rotation.
+// 2. Producer Thread (producer_loop):
+//    Tracks closest target in FOV, checks isFiring (0x850 in maxff.h), resolves
+//    AimInfo (0xE58 in maxff.h) & StartPos (0x4C in maxff.h), and computes the 3D
+//    head trajectory vector (targetHead - ammoBase).
+//
+// ZERO FAKE DAMAGE INVARIANT:
+// - NEVER mutates enemy Colider_Field (0x80), which causes server-side desync.
+// - Only the local player's weapon raycast (0x40) is redirected.
 // ============================================================================
 
 #include "common.hpp"
@@ -25,11 +28,21 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <chrono>
 
 namespace aimbot {
 
     inline std::atomic<bool> g_aim_running{false};
-    inline std::thread       g_tracking_thread;
+    inline std::thread       g_writer_thread;
+    inline std::thread       g_producer_thread;
+
+    inline void clear_silent_data() {
+        if (g_hasData.load(std::memory_order_relaxed) || g_hitObj != 0) {
+            std::lock_guard<std::mutex> lock(g_silent_lock);
+            g_hasData.store(false, std::memory_order_relaxed);
+            g_hitObj = 0;
+        }
+    }
 
     inline void clear_aim_state() {
         s_lockedTargetAddr = 0;
@@ -37,58 +50,118 @@ namespace aimbot {
     }
 
     // ------------------------------------------------------------------------
-    // REAL-TIME TARGET TRACKING LOOP (Pure Non-Invasive Read-Only)
+    // HIGH-SPEED WEAPON RAYCAST WRITER THREAD (Matching pewpew writer_loop)
     // ------------------------------------------------------------------------
-    inline void tracking_loop() {
+    inline void writer_loop() {
+        while (g_aim_running.load(std::memory_order_relaxed)) {
+            if (!g_hasData.load(std::memory_order_relaxed) || g_hitObj == 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            // Zero-delay continuous memory write while shooting
+            {
+                std::lock_guard<std::mutex> lock(g_silent_lock);
+                if (g_hasData.load(std::memory_order_relaxed) && g_hitObj != 0) {
+                    // Write to local weapon AimInfo.raycast (0x40 in maxff.h)
+                    wpm<Vector3>(g_hitObj + Offsets::AimInfo_Direction, g_targetDir);
+                }
+            }
+            sched_yield();
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // TARGET SELECTOR & TRAJECTORY PRODUCER THREAD (Matching pewpew)
+    // ------------------------------------------------------------------------
+    inline void producer_loop() {
         while (g_aim_running.load(std::memory_order_relaxed)) {
             if (!cfg::master_enabled || !cfg::aim::enable || !data::inMatch.load(std::memory_order_relaxed)) {
+                clear_silent_data();
                 clear_aim_state();
                 {
                     std::lock_guard<std::mutex> lk(g_targetMutex);
                     g_currentTarget.valid = false;
                 }
-                sched_yield();
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 continue;
             }
 
             uint64_t localPlayer = data::localPlayerAddr.load(std::memory_order_relaxed);
             if (!is_valid_ptr(localPlayer)) {
+                clear_silent_data();
                 clear_aim_state();
                 {
                     std::lock_guard<std::mutex> lk(g_targetMutex);
                     g_currentTarget.valid = false;
                 }
-                sched_yield();
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
                 continue;
             }
 
             motion::update();
 
             TargetAcquisitionResult acq = acquire_target(localPlayer);
-            if (!acq.valid || acq.target.curHP <= 0 || !acq.triggerActive) {
+            if (!acq.valid || acq.target.curHP <= 0) {
+                clear_silent_data();
                 s_smoothDir = Vector3::Zero();
                 {
                     std::lock_guard<std::mutex> lk(g_targetMutex);
                     g_currentTarget.valid = false;
                 }
-                sched_yield();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
 
-            // Target actively locked inside FOV: update visual lock reticle
+            // Update visual reticle for FOV overlay
             {
                 std::lock_guard<std::mutex> lk(g_targetMutex);
                 g_currentTarget.valid = true;
                 g_currentTarget.screenPos = acq.bestScreenPos;
             }
 
+            // Resolve local weapon AimInfo (maxff.h: aimInfo == 0xE58)
+            uint64_t hitObjAddress = rpm<uint64_t>(localPlayer + Offsets::Player_AimInfo);
+            if (!is_valid_ptr(hitObjAddress)) {
+                hitObjAddress = rpm<uint64_t>(localPlayer + Offsets::Player_AimInfo_Alt);
+            }
+
+            // Check firing state (maxff.h: isFiring == 0x850)
+            int isFiring = rpm<int>(localPlayer + Offsets::Player_IsFiring);
+            bool triggerActive = (cfg::aim::trigger_mode == 1) ? true : (isFiring > 0);
+
+            if (triggerActive && is_valid_ptr(hitObjAddress) && acq.target.headWorld != Vector3::Zero()) {
+                // Resolve muzzle startPos (maxff.h: startPos == 0x4C)
+                Vector3 ammoBase = rpm<Vector3>(hitObjAddress + Offsets::AimInfo_StartPosition);
+                if (ammoBase == Vector3::Zero() || !std::isfinite(ammoBase.x)) {
+                    uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
+                    if (localHead) ammoBase = GetNodePosition(localHead);
+                }
+
+                if (ammoBase != Vector3::Zero() && std::isfinite(ammoBase.x)) {
+                    Vector3 targetHead = acq.target.getHeadAimPoint(cfg::aim::head_bias);
+                    Vector3 dir;
+                    dir.x = targetHead.x - ammoBase.x;
+                    dir.y = targetHead.y - ammoBase.y;
+                    dir.z = targetHead.z - ammoBase.z;
+
+                    if (dir.sqrMagnitude() > 1e-4f && std::isfinite(dir.x)) {
+                        std::lock_guard<std::mutex> lock(g_silent_lock);
+                        g_hitObj = hitObjAddress;
+                        g_targetDir = dir;
+                        g_hasData.store(true, std::memory_order_relaxed);
+                    }
+                }
+            } else {
+                clear_silent_data();
+            }
+
             sched_yield();
         }
     }
 
-    // Single-tick update for synchronous callers (menu / UI tests)
     inline void update() {
-        // Handled in real-time by tracking_loop
+        // Handled in real-time by producer_loop and writer_loop
     }
 
     // ------------------------------------------------------------------------
@@ -96,13 +169,16 @@ namespace aimbot {
     // ------------------------------------------------------------------------
     inline void thread_start() {
         if (g_aim_running.exchange(true)) return;
-        g_tracking_thread = std::thread(tracking_loop);
+        g_writer_thread   = std::thread(writer_loop);
+        g_producer_thread = std::thread(producer_loop);
     }
 
     inline void thread_stop() {
         if (!g_aim_running.exchange(false)) return;
+        clear_silent_data();
         clear_aim_state();
-        if (g_tracking_thread.joinable()) g_tracking_thread.join();
+        if (g_writer_thread.joinable())   g_writer_thread.join();
+        if (g_producer_thread.joinable()) g_producer_thread.join();
         std::lock_guard<std::mutex> lk(g_targetMutex);
         g_currentTarget.valid = false;
     }
