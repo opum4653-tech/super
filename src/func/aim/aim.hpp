@@ -93,7 +93,9 @@ namespace aimbot {
 
             if (cameraPos != Vector3::Zero() && std::isfinite(cameraPos.x)) {
                 const Vector3 targetHead = acq.target.getHeadAimPoint(rc.aimHeadBias);
-                const Vector3 dir = targetHead - cameraPos;
+                // Vector3::sqrMagnitude()/normalized() are non-const in this
+                // math header, so keep the working direction mutable.
+                Vector3 dir = targetHead - cameraPos;
 
                 if (dir.sqrMagnitude() > 1e-4f && std::isfinite(dir.x)) {
                     const Quaternion targetRot =

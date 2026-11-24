@@ -186,7 +186,7 @@ inline void publish_runtime() {
     s.aimIgnoreBots   = aim::ignore_bots;
     s.aimTriggerMode  = aim::trigger_mode;
     s.aimPriorityMode = aim::priority_mode;
-    s.aimSmooth       = smooth;
+    s.aimSmooth       = aim::smooth;
     s.aimHeadBias     = aim::head_bias;
     s.aimMaxDistance  = aim::max_distance;
     s.espMaxRange     = esp::max_range;
