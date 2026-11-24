@@ -1,25 +1,22 @@
 #pragma once
 // ============================================================================
-// AIMBOT — VIEW ROTATION & HEADSHOT ENGINE (FREE FIRE MAX)
+// AIMBOT — EVENT-DRIVEN SMOOTH VIEW LOCK (FREE FIRE MAX)
 // ============================================================================
 // Project: crack_master
 // Target Platform: com.dts.freefiremax (ARM64-v8a)
-// Source Reference: STORM_MODS Server.cpp (AimHardTh line 841 & AimColliderTh line 624)
 //
-// SYSTEM ARCHITECTURE (STORM_MODS PARITY):
-// 1. Single Background Aim Thread (aim_loop):
-//    - When firing (isFiring == true, 0x850 in maxff.h & STORM_MODS):
-//      * Acquires target in FOV circle closest to crosshair.
-//      * Resolves camera world position from ViewMatrix (GetCameraPosition).
-//      * Computes direction to target head: dir = (targetHead - cameraPos).normalized().
-//      * Computes Quaternion targetRot = Quaternion::LookRotation(dir, Vector3(0, 1, 0)).
-//      * Writes targetRot into localPlayer + AimRotation (0x61C).
-//      * Maps HeadCollider (0x740) into ColliderBody (0x80) for 100% headshot registration.
-//      * Sleeps 35ms - 65ms between writes (matches STORM_MODS line 869).
-//    - When NOT firing (or target leaves FOV):
-//      * Sleeps 15ms.
-//      * NEVER writes to AimRotation!
-//      * Leaves camera rotation and touch controls 100% free and responsive.
+// SYSTEM ARCHITECTURE (NO TIMERS, NO CACHE, NO PRE-WRITE):
+// 1. The thread waits on cfg::g_state_cv. It wakes only when the UI changes a
+//    menu value or the scraper publishes a fresh entity snapshot.
+// 2. Every wake resolves the target from the current snapshot. There is no
+//    sticky rotation cache and no fixed 1 ms / 4 ms write cadence.
+// 3. When Master or Aimbot is OFF, or firing/trigger is inactive, ZERO memory
+//    writes are issued. The game keeps its official view rotation untouched.
+// 4. When active, the view moves from the game's current rotation toward the
+//    target using Quaternion::Slerp. The menu Smooth slider controls the step:
+//    0 = instant, 100 = no movement. It is not a hidden/default behaviour.
+// 5. Only localPlayer + Player_Rotation (0x61C) is written. No enemy collider
+//    or other game state is modified.
 // ============================================================================
 
 #include "common.hpp"
@@ -29,102 +26,111 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
-#include <chrono>
-#include <random>
+#include <condition_variable>
 
 namespace aimbot {
 
     inline std::atomic<bool> g_aim_running{false};
     inline std::thread       g_aim_thread;
 
+    inline void clear_target_snapshot() {
+        std::lock_guard<std::mutex> lk(g_targetMutex);
+        g_currentTarget.valid = false;
+        g_currentTarget.screenPos = Vector3::Zero();
+    }
+
     // ------------------------------------------------------------------------
-    // REAL-TIME AIMBOT & HEADSHOT LOOP (MATCHING STORM_MODS EXACT ENGINE)
+    // REAL-TIME AIM LOOP — driven by real menu/scraper state changes only.
     // ------------------------------------------------------------------------
     inline void aim_loop() {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        static std::uniform_int_distribution<int> sleepDist(35, 65);
+        uint64_t lastState = cfg::g_state_generation;
+        std::unique_lock<std::mutex> waitLock(cfg::g_runtime_mutex);
 
         while (g_aim_running.load(std::memory_order_relaxed)) {
-            if (!cfg::master_enabled || !cfg::aim::enable || !data::inMatch.load(std::memory_order_relaxed)) {
-                {
-                    std::lock_guard<std::mutex> lk(g_targetMutex);
-                    g_currentTarget.valid = false;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            cfg::g_state_cv.wait(waitLock, [&]() {
+                return !g_aim_running.load(std::memory_order_relaxed) ||
+                       cfg::g_state_generation != lastState;
+            });
+            if (!g_aim_running.load(std::memory_order_relaxed)) break;
+            lastState = cfg::g_state_generation;
+            waitLock.unlock();
+
+            const cfg::RuntimeConfig rc = cfg::runtime();
+            const bool active = rc.master && rc.aimEnable &&
+                                data::inMatch.load(std::memory_order_relaxed);
+            const uint64_t localPlayer = active
+                ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
+
+            if (!active || !is_valid_ptr(localPlayer)) {
+                clear_target_snapshot();
+                waitLock.lock();
                 continue;
             }
 
-            uint64_t localPlayer = data::localPlayerAddr.load(std::memory_order_relaxed);
-            if (!is_valid_ptr(localPlayer)) {
-                {
-                    std::lock_guard<std::mutex> lk(g_targetMutex);
-                    g_currentTarget.valid = false;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                continue;
-            }
+            motion::update(); // Zero-op; motion exploits stay disabled.
 
-            // Motion hacks update (air flight, phantom mode if active)
-            motion::update();
-
-            // Dynamic target selector matching STORM_MODS lines 1123-1170
             TargetAcquisitionResult acq = acquire_target(localPlayer);
-
-            // Update visual FOV lock ring
             {
                 std::lock_guard<std::mutex> lk(g_targetMutex);
                 g_currentTarget.valid = acq.valid;
                 g_currentTarget.screenPos = acq.bestScreenPos;
             }
 
-            // Check firing state (isFiring == 0x850 in maxff.h & STORM_MODS)
-            bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
-            bool triggerActive = (cfg::aim::trigger_mode == 1) ? true : isFiring;
+            const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
+            const bool triggerActive = (rc.aimTriggerMode == 1) || isFiring;
 
-            // Only actively lock/write when firing (or trigger active) and qualified target exists
-            if (triggerActive && acq.valid && acq.target.headWorld != Vector3::Zero()) {
-                // Resolve 3D Camera World Position (STORM_MODS GetCameraWorldPosManual line 864)
-                Vector3 cameraPos = GetCameraPosition(data::viewMatrix);
-                if (cameraPos == Vector3::Zero() || !std::isfinite(cameraPos.x)) {
-                    uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
-                    if (localHead) cameraPos = GetNodePosition(localHead);
-                }
+            if (!triggerActive || !acq.valid || acq.target.headWorld == Vector3::Zero()) {
+                clear_target_snapshot();
+                waitLock.lock();
+                continue;
+            }
 
-                if (cameraPos != Vector3::Zero() && std::isfinite(cameraPos.x)) {
-                    Vector3 targetHead = acq.target.getHeadAimPoint(cfg::aim::head_bias);
-                    Vector3 dir = targetHead - cameraPos;
+            Vector3 cameraPos = GetCameraPosition(data::get_view_matrix());
+            if (cameraPos == Vector3::Zero() || !std::isfinite(cameraPos.x)) {
+                const uint64_t localHead = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
+                if (localHead != 0) cameraPos = GetNodePosition(localHead);
+            }
 
-                    if (dir.sqrMagnitude() > 1e-4f && std::isfinite(dir.x)) {
-                        Vector3 normDir = dir.normalized();
-                        Quaternion targetRot = Quaternion::LookRotation(normDir, Vector3(0, 1, 0));
+            if (cameraPos != Vector3::Zero() && std::isfinite(cameraPos.x)) {
+                const Vector3 targetHead = acq.target.getHeadAimPoint(rc.aimHeadBias);
+                const Vector3 dir = targetHead - cameraPos;
 
-                        // 1. Physically snap player's view angles to target head (STORM_MODS line 868)
-                        wpm<Quaternion>(localPlayer + Offsets::Player_Rotation, targetRot);
+                if (dir.sqrMagnitude() > 1e-4f && std::isfinite(dir.x)) {
+                    const Quaternion targetRot =
+                        Quaternion::LookRotation(dir.normalized(), Vector3(0, 1, 0));
 
-                        // 2. Map HeadCollider (0x740) into ColliderBody (0x80) (STORM_MODS line 643)
-                        // This guarantees 100% headshot hit registration with zero server rejection
-                        uint64_t headCollider = rpm<uint64_t>(acq.target.addr + Offsets::Player_HeadCollider);
-                        if (headCollider > 0x10000) {
-                            wpm<uint64_t>(acq.target.addr + Offsets::Player_LockedAimingCollider, headCollider);
+                    float smooth = rc.aimSmooth;
+                    if (!std::isfinite(smooth)) smooth = 0.0f;
+                    if (smooth < 0.0f) smooth = 0.0f;
+                    if (smooth > 100.0f) smooth = 100.0f;
+
+                    // Smooth = 100 means the user explicitly asked for no
+                    // movement. Do not write at all in that state.
+                    if (smooth < 100.0f) {
+                        Quaternion currentRot =
+                            rpm<Quaternion>(localPlayer + Offsets::Player_Rotation);
+                        if (!std::isfinite(currentRot.x) || !std::isfinite(currentRot.y) ||
+                            !std::isfinite(currentRot.z) || !std::isfinite(currentRot.w) ||
+                            Quaternion::Norm(currentRot) < 1e-5f) {
+                            currentRot = targetRot;
                         }
 
-                        // Sleep 35-65ms matching STORM_MODS line 869
-                        // Critical: allows touch screen inputs to register naturally without view freezing!
-                        std::this_thread::sleep_for(std::chrono::milliseconds(sleepDist(gen)));
-                        continue;
+                        const float t = 1.0f - (smooth / 100.0f);
+                        const Quaternion blended = Quaternion::Slerp(currentRot, targetRot, t);
+                        wpm_verified(localPlayer + Offsets::Player_Rotation, blended);
                     }
                 }
             }
 
-            // Idle interval when not shooting: 15ms sleep with ZERO memory writes!
-            // Touch screen controls and view rotation are 100% free and responsive.
-            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+            waitLock.lock();
         }
+
+        waitLock.unlock();
+        clear_target_snapshot();
     }
 
     inline void update() {
-        // Handled in real-time by aim_loop
+        // Handled by aim_loop on real state-change events.
     }
 
     // ------------------------------------------------------------------------
@@ -137,9 +143,9 @@ namespace aimbot {
 
     inline void thread_stop() {
         if (!g_aim_running.exchange(false)) return;
+        cfg::notify_state_change();
         if (g_aim_thread.joinable()) g_aim_thread.join();
-        std::lock_guard<std::mutex> lk(g_targetMutex);
-        g_currentTarget.valid = false;
+        clear_target_snapshot();
     }
 
 } // namespace aimbot

@@ -35,5 +35,12 @@ namespace data {
     extern std::atomic<uint64_t>   localPlayerAddr;// Pointer to local user player entity
     extern std::atomic<bool>       inMatch;        // True when local player is in an active match
     extern matrix                  viewMatrix;     // Validated 4x4 camera view matrix for W2S projections
+    matrix                         get_view_matrix(); // Mutex-protected snapshot for worker threads
+
+    // Runtime resolution telemetry (read by the Info tab)
+    extern std::atomic<uint64_t>   selectedMatchAddr;
+    extern std::atomic<uint64_t>   selectedDictAddr;
+    extern std::atomic<int>        selectedEnemyCount;
+    extern std::atomic<int>        selectedDictCount;
 
 } // namespace data

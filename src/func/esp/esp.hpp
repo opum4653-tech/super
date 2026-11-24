@@ -44,7 +44,7 @@ namespace func::esp {
             // whose w is small but positive; data.cpp uses 0.001f. Keep both
             // pipeline halves on the same near-plane threshold.
             if (p.Head.z < 0.001f || p.Toe.z < 0.001f) continue;
-            if (p.curHP <= 0) continue;
+            if (p.hpValid && p.curHP <= 0) continue;
             if (cfg::esp::ignore_bots && p.isBot) continue;
             if (cfg::esp::max_range > 0.0f && p.distance > cfg::esp::max_range) continue;
 
@@ -71,9 +71,8 @@ namespace func::esp {
 
             // 2. Bounding Box
             if (cfg::esp::box) {
-                if (cfg::esp::box_filled) {
-                    dl->AddRectFilled(tl, br, withAlpha(colBase, 0.15f), cfg::esp::box_rounding);
-                }
+                // drawBox() owns the optional fill so border-only mode stays
+                // completely transparent inside the rectangle.
                 drawBox(dl, tl, br, colBase, cfg::esp::box_type);
             }
 

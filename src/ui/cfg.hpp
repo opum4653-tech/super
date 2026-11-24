@@ -17,8 +17,12 @@
 // ============================================================================
 
 #include "imgui.h"
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
 
 extern float g_sw;
+extern float g_sh;
 
 namespace cfg {
 
@@ -63,7 +67,7 @@ namespace aim {
     inline bool  show_fov         = false; // Render FOV Circle
     inline float aim_fov          = 90.0f;  // Default 90 deg acquisition FOV
     inline float fov_radius       = 200.0f; // Default 200px screen radius
-    inline float smooth           = 0.0f;
+    inline float smooth           = 70.0f; // Visible menu value: 0 = instant, 100 = no movement
     inline float head_bias        = 0.0f;
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
@@ -95,6 +99,133 @@ inline bool any_feature_enabled() {
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair || esp::firing_ind ||
            motion::air_flight || motion::phantom_mode;
+}
+
+// ---------------------------------------------------------------------------
+// THREAD-SAFE RUNTIME SNAPSHOT
+// UI writes the plain values above on the render thread once per frame.
+// Worker threads (scraper / aim) read this immutable snapshot only, so no
+// bool/float is ever torn between an ImGui widget and a background loop.
+// ---------------------------------------------------------------------------
+struct RuntimeConfig {
+    bool  master            = false;
+    bool  aimEnable         = false;
+    bool  aimShowFov        = false;
+    bool  aimIgnoreBots     = false;
+    int   aimTriggerMode    = 0;
+    int   aimPriorityMode   = 0;
+    float aimFovRadius      = 200.0f;
+    float aimSmooth         = 0.0f;
+    float aimHeadBias       = 0.0f;
+    float aimMaxDistance    = 0.0f;
+    float espMaxRange       = 0.0f;
+    float espLootRange      = 0.0f;
+    bool  espBox            = false;
+    bool  espName           = false;
+    bool  espHealth         = false;
+    bool  espArmor          = false;
+    bool  espDistance       = false;
+    bool  espWeapon         = false;
+    bool  espTracer         = false;
+    bool  espLoot           = false;
+    bool  espCrosshair      = false;
+    bool  espFiringInd      = false;
+    bool  espBotTag         = false;
+    bool  anyFeature        = false;
+    float screenW           = 1920.0f;
+    float screenH           = 1080.0f;
+
+    bool equals(const RuntimeConfig& o) const {
+        return master == o.master &&
+               aimEnable == o.aimEnable &&
+               aimShowFov == o.aimShowFov &&
+               aimIgnoreBots == o.aimIgnoreBots &&
+               aimTriggerMode == o.aimTriggerMode &&
+               aimPriorityMode == o.aimPriorityMode &&
+               aimFovRadius == o.aimFovRadius &&
+               aimSmooth == o.aimSmooth &&
+               aimHeadBias == o.aimHeadBias &&
+               aimMaxDistance == o.aimMaxDistance &&
+               espMaxRange == o.espMaxRange &&
+               espLootRange == o.espLootRange &&
+               espBox == o.espBox &&
+               espName == o.espName &&
+               espHealth == o.espHealth &&
+               espArmor == o.espArmor &&
+               espDistance == o.espDistance &&
+               espWeapon == o.espWeapon &&
+               espTracer == o.espTracer &&
+               espLoot == o.espLoot &&
+               espCrosshair == o.espCrosshair &&
+               espFiringInd == o.espFiringInd &&
+               espBotTag == o.espBotTag &&
+               anyFeature == o.anyFeature &&
+               screenW == o.screenW &&
+               screenH == o.screenH;
+    }
+};
+
+inline RuntimeConfig             g_runtime_snapshot{};
+inline std::mutex                g_runtime_mutex;
+inline std::condition_variable   g_state_cv;
+inline uint64_t                  g_state_generation = 0;
+
+// Called by the scraper after a fresh real-time entity snapshot. No timer:
+// workers wake only on actual state changes.
+inline void notify_state_change() {
+    std::lock_guard<std::mutex> lk(g_runtime_mutex);
+    ++g_state_generation;
+    g_state_cv.notify_all();
+}
+
+inline void publish_runtime() {
+    RuntimeConfig s;
+    s.master          = master_enabled;
+    s.aimEnable       = aim::enable;
+    s.aimShowFov      = aim::show_fov;
+    s.aimIgnoreBots   = aim::ignore_bots;
+    s.aimTriggerMode  = aim::trigger_mode;
+    s.aimPriorityMode = aim::priority_mode;
+    s.aimSmooth       = smooth;
+    s.aimHeadBias     = aim::head_bias;
+    s.aimMaxDistance  = aim::max_distance;
+    s.espMaxRange     = esp::max_range;
+    s.espLootRange    = esp::loot_range;
+    s.espBox          = esp::box;
+    s.espName         = esp::name;
+    s.espHealth       = esp::health;
+    s.espArmor        = esp::armor;
+    s.espDistance     = esp::distance;
+    s.espWeapon       = esp::weapon;
+    s.espTracer       = esp::tracer;
+    s.espLoot         = esp::loot;
+    s.espCrosshair    = esp::crosshair;
+    s.espFiringInd    = esp::firing_ind;
+    s.espBotTag       = esp::bot_tag;
+    s.anyFeature      = any_feature_enabled();
+    s.screenW         = g_sw;
+    s.screenH         = g_sh;
+
+    if (aim::aim_fov > 0.0f && g_sw > 0.0f) {
+        s.aimFovRadius = (aim::aim_fov / 180.0f) * (g_sw * 0.55f);
+    } else if (aim::fov_radius > 0.0f) {
+        s.aimFovRadius = aim::fov_radius;
+    } else {
+        s.aimFovRadius = (g_sw > 0.0f) ? (g_sw * 0.25f) : 250.0f;
+    }
+
+    const bool changed = !s.equals(g_runtime_snapshot);
+    {
+        std::lock_guard<std::mutex> lk(g_runtime_mutex);
+        g_runtime_snapshot = s;
+        if (changed) ++g_state_generation;
+    }
+    if (changed) g_state_cv.notify_all();
+}
+
+inline RuntimeConfig runtime() {
+    std::lock_guard<std::mutex> lk(g_runtime_mutex);
+    return g_runtime_snapshot;
 }
 
 }

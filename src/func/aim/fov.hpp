@@ -6,7 +6,7 @@
 //
 // SYSTEM ROLE:
 // Renders the visual aim trigger radius and active target acquisition indicators:
-// - Outer FOV Ring: Displays exact screen pixel boundary where enemies will be acquired.
+// - Outer FOV Ring: Warm amber + cyan rings for a high-contrast trigger boundary.
 // - Dynamic Scaling: Radius calculated from cfg::aim::get_fov_radius().
 // - Target Lock Ring: Red-and-white targeting reticle placed on target screen position
 //   whenever an enemy is actively locked by the aim hysteresis engine.
@@ -20,17 +20,18 @@ namespace aimbot {
     // Scaled dynamically by cfg::aim::get_fov_radius()
     inline void render_fov(ImDrawList* dl) {
 
-        if (!cfg::master_enabled) return;
-        if (!cfg::aim::enable || !cfg::aim::show_fov) return;
+        const cfg::RuntimeConfig rc = cfg::runtime();
+        if (!rc.master) return;
+        if (!rc.aimEnable || !rc.aimShowFov) return;
         if (!data::inMatch.load(std::memory_order_relaxed)) return;
 
-        float cx = g_sw * 0.5f;
-        float cy = g_sh * 0.5f;
-        float r  = cfg::aim::get_fov_radius();
+        float cx = rc.screenW * 0.5f;
+        float cy = rc.screenH * 0.5f;
+        float r  = rc.aimFovRadius;
 
-        // Smooth Orchid / White FOV circle (shows exact trigger zone)
-        dl->AddCircle(ImVec2(cx, cy), r, IM_COL32(255, 255, 255, 45), 64, 1.0f);
-        dl->AddCircle(ImVec2(cx, cy), r + 1.0f, IM_COL32(225, 0, 153, 160), 64, 1.5f);
+        // Distinct warm-cyan rings: readable over green ESP and dark terrain.
+        dl->AddCircle(ImVec2(cx, cy), r, IM_COL32(255, 196, 64, 70), 64, 1.2f);
+        dl->AddCircle(ImVec2(cx, cy), r + 1.0f, IM_COL32(64, 230, 255, 210), 64, 2.0f);
 
         // If target is actively locked inside FOV, draw target lock ring (thread-safe snapshot)
         TargetInfo targetSnap;

@@ -44,10 +44,14 @@ namespace ImGui {
 }
 
 extern std::atomic<bool> main_thread_flag;
+extern float g_sw;
+extern float g_sh;
 static int activeTab = 1; // Default to Tab 1 (Visual) matching screenshot
 static float ui_opacity = 1.0f;
 static std::atomic<bool> menu_open{false};
 static std::atomic<bool> g_should_exit{false};
+// Shared debounce so the minimize tap cannot immediately re-open the ball.
+static double g_last_menu_toggle_time = 0.0;
 
 // ============================================================================
 // EMERALD / NEON GREEN PALETTE (MATCHING SCREENSHOT)
@@ -156,10 +160,42 @@ static void handleTouchScroll() {
 }
 
 // ----------------------------------------------------------------------------
+// TOUCH-SAFE INVISIBLE BUTTON
+// ImGui::InvisibleButton() only reports a click when down+up land inside the
+// same frame. Touch injection can split that across frames or cancel the active
+// ID during a vertical scroll gesture. Latch activation and fire on release
+// while the finger is still over the rect.
+// ----------------------------------------------------------------------------
+static bool TouchInvisibleButton(const char* id, ImVec2 size) {
+    const ImGuiID key = ImGui::GetID(id);
+    const bool rawPressed = ImGui::InvisibleButton(id, size);
+    const bool activated = ImGui::IsItemActivated();
+    const bool deactivated = ImGui::IsItemDeactivated();
+    const ImVec2 rmin = ImGui::GetItemRectMin();
+    const ImVec2 rmax = ImGui::GetItemRectMax();
+    const bool over = ImGui::IsMouseHoveringRect(rmin, rmax, false);
+
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    bool* armed = st->GetBoolRef(key ^ 0x51A7u, false);
+    bool* pending = st->GetBoolRef(key ^ 0xA3C1u, false);
+
+    const bool mouseDown = ImGui::GetIO().MouseDown[0];
+    const bool scrollNow = mouseDown && s_touch_scrolling_active;
+
+    if (activated) *armed = true;
+    if (deactivated && *armed && over && !scrollNow) *pending = true;
+    if (!mouseDown && !deactivated) *armed = false;
+
+    const bool result = *pending || (rawPressed && !scrollNow);
+    *pending = false;
+    return result;
+}
+
+// ----------------------------------------------------------------------------
 // CUSTOM WIDGET: TOP NAVIGATION TAB BUTTON
 // ----------------------------------------------------------------------------
 static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, float ui_scale = 1.0f) {
-    bool pressed = ImGui::InvisibleButton(label, size);
+    bool pressed = TouchInvisibleButton(label, size);
     bool hovered = ImGui::IsItemHovered();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -197,7 +233,7 @@ static bool DrawTopTabButton(const char* label, bool is_active, ImVec2 size, flo
 // ----------------------------------------------------------------------------
 static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, float size, float ui_scale = 1.0f) {
     ImGui::SetCursorScreenPos(pos);
-    bool pressed = ImGui::InvisibleButton(id, ImVec2(size, size));
+    bool pressed = TouchInvisibleButton(id, ImVec2(size, size));
     bool hovered = ImGui::IsItemHovered();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -215,6 +251,30 @@ static bool DrawHeaderSquareBtn(const char* id, const char* text, ImVec2 pos, fl
     ImVec2 tpos(bMin.x + (size - tsz.x) * 0.5f, bMin.y + (size - tsz.y) * 0.5f);
     dl->AddText(font, fontSize, tpos, theme_overlay::ColTextWhite, text);
 
+    return pressed;
+}
+
+// ----------------------------------------------------------------------------
+// TOUCH-SAFE STANDARD BUTTON
+// Same release-latch behaviour as the header button, but styled like a normal
+// ImGui Button so existing push/pop colour styling keeps working.
+// ----------------------------------------------------------------------------
+static bool TouchButton(const char* label, ImVec2 size) {
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool pressed = TouchInvisibleButton(label, size);
+    const bool hovered = ImGui::IsItemHovered();
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 col = ImGui::GetColorU32(pressed ? ImGuiCol_ButtonActive
+                                                : (hovered ? ImGuiCol_ButtonHovered
+                                                           : ImGuiCol_Button));
+    dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), col, 6.0f);
+
+    ImFont* font = ImGui::GetFont();
+    const ImVec2 tsz = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, label);
+    const ImVec2 tpos(p.x + (size.x - tsz.x) * 0.5f,
+                      p.y + (size.y - tsz.y) * 0.5f);
+    dl->AddText(font, font->FontSize, tpos, ImGui::GetColorU32(ImGuiCol_Text), label);
     return pressed;
 }
 
@@ -255,8 +315,8 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
     char btn_id[128];
     snprintf(btn_id, sizeof(btn_id), "##SwitchBtn_%s", label);
 
-    bool pressed = ImGui::InvisibleButton(btn_id, ImVec2(availW, row_height));
-    if (pressed && !s_touch_scrolling_active) {
+    bool pressed = TouchInvisibleButton(btn_id, ImVec2(availW, row_height));
+    if (pressed) {
         *v = !(*v);
     }
 
@@ -303,11 +363,6 @@ static bool DrawToggleSwitch(const char* label, bool* v, float row_height = 46.0
 namespace ui::menu {
 
     void render() {
-        // Render background overlays (ESP & Aimbot FOV)
-        // Note: func::aim::update() runs decoupled in the dedicated aimbot worker thread
-        func::esp::draw();
-        func::aim::render_fov(ImGui::GetBackgroundDrawList());
-
         ImGuiIO& io = ImGui::GetIO();
 
         float realW = (io.DisplaySize.x > 0.0f) ? io.DisplaySize.x : (float)native_window_screen_x;
@@ -334,6 +389,21 @@ namespace ui::menu {
         last_orientation = current_orientation;
         last_screen_w = realW;
         last_screen_h = realH;
+
+        // W2S, FOV and ESP all read g_sw/g_sh. Keep them on the live ImGui
+        // display size every frame; only the layout reposition needs the
+        // large-change threshold above. Update before drawing so a rotation
+        // frame never projects with the previous orientation's dimensions.
+        if (std::abs(g_sw - realW) > 0.5f || std::abs(g_sh - realH) > 0.5f) {
+            g_sw = realW;
+            g_sh = realH;
+        }
+
+        // Render background overlays (ESP & Aimbot FOV)
+        // Note: func::aim::update() runs decoupled in the dedicated aimbot worker thread.
+        // cfg::publish_runtime() below hands the updated dimensions to workers.
+        func::esp::draw();
+        func::aim::render_fov(ImGui::GetBackgroundDrawList());
 
         // Dynamic responsive UI scaling (aligned with Kernel project: 1.0 at 1080p)
         float ui_scale = realH / 1080.0f;
@@ -416,13 +486,12 @@ namespace ui::menu {
                 }
 
                 // Smooth tap toggle without artificial startup delays
-                static double s_last_toggle_time = 0.0;
                 double cur_time = ImGui::GetTime();
 
                 if (s_was_activated && (clicked || (deactivated && !s_moved_drag))) {
-                    if (cur_time - s_last_toggle_time > 0.25) {
+                    if (cur_time - g_last_menu_toggle_time > 0.25) {
                         menu_open = true;
-                        s_last_toggle_time = cur_time;
+                        g_last_menu_toggle_time = cur_time;
                     }
                     s_moved_drag = false;
                     s_is_dragging = false;
@@ -446,6 +515,10 @@ namespace ui::menu {
             }
             ImGui::End();
             ImGui::PopStyleVar();
+
+            // Publish UI state before leaving the frame; workers never read
+            // the plain cfg values directly.
+            cfg::publish_runtime();
 
             // Menu is minimized, done for this frame!
             return;
@@ -558,6 +631,7 @@ namespace ui::menu {
             // [ - ] Button (Minimize to floating ball)
             if (DrawHeaderSquareBtn("##TopBtnMinus", "-", ImVec2(btnMinusX, btnY), btnSize, ui_scale)) {
                 menu_open = false;
+                g_last_menu_toggle_time = ImGui::GetTime();
                 s_circle_pos = ImVec2(std::clamp(s_menu_pos.x + logoRadius + 8.0f, margin + logoRadius, realW - logoRadius - margin),
                                       std::clamp(s_menu_pos.y + logoRadius + 8.0f, margin + logoRadius, realH - logoRadius - margin));
             }
@@ -626,7 +700,7 @@ namespace ui::menu {
                             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.16f, 0.12f, 1.0f));
                             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
                         }
-                        if (ImGui::Button(modeLabels[m], ImVec2(btnW, 36.0f * ui_scale))) {
+                        if (TouchButton(modeLabels[m], ImVec2(btnW, 36.0f * ui_scale))) {
                             kpm.diag.selected_engine = m;
                             kpm.test_connection(proc::pid);
                         }
@@ -706,9 +780,19 @@ namespace ui::menu {
                     ImGui::Text("Reads: %llu total / %llu failed",
                                 (unsigned long long)kpm.diag.total_reads,
                                 (unsigned long long)kpm.diag.failed_reads);
+                    ImGui::Text("Writes: %llu total / %llu failed | Verified: %llu / %llu bad",
+                                (unsigned long long)kpm.diag.total_writes,
+                                (unsigned long long)kpm.diag.failed_writes,
+                                (unsigned long long)kpm.diag.verified_writes,
+                                (unsigned long long)kpm.diag.failed_verified_writes);
+                    ImGui::Text("Resolved: match=0x%llx dict=0x%llx dictN=%d enemies=%d",
+                                (unsigned long long)data::selectedMatchAddr.load(),
+                                (unsigned long long)data::selectedDictAddr.load(),
+                                data::selectedDictCount.load(),
+                                data::selectedEnemyCount.load());
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    if (ImGui::Button("Test / Re-detect KPM Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
+                    if (TouchButton("Test / Re-detect KPM Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
                         kpm.test_connection(proc::pid);
                         if (proc::pid > 0) proc::lib = get_lib();
                     }
@@ -803,6 +887,16 @@ namespace ui::menu {
                     ImGui::TextDisabled("AimFov (0 - 180)");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##AimSmooth", &cfg::aim::smooth, 0.0f, 100.0f, "%.0f%%");
+                    ImGui::TextDisabled("Aim Smooth (0 = instant, 100 = no movement)");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##HeadBias", &cfg::aim::head_bias, -0.5f, 0.5f, "%.2f m");
+                    ImGui::TextDisabled("Head Aim Offset (menu-controlled)");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Range: Official Game Range (Uncapped)");
                     ImGui::TextDisabled("Tracks all active targets within official game visibility.");
 
@@ -819,8 +913,8 @@ namespace ui::menu {
                     ImGui::TextDisabled("Target Priority Mode");
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX (100%% Head Lock)");
-                    ImGui::TextDisabled("Direct AimRotation view angle lock to head bone (0x61C in maxff.h).");
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX (menu-controlled smooth head lock)");
+                    ImGui::TextDisabled("AimRotation is written only while the trigger is active and a target is live.");
                 }
                 // ============================================================
                 // TAB 3: MOTION (ANTI-BAN PROTECTED)
@@ -857,7 +951,7 @@ namespace ui::menu {
                     ImGui::TextDisabled("Menu Window Opacity");
 
                     ImGui::Dummy(ImVec2(0, 20.0f * ui_scale));
-                    if (ImGui::Button("SAFE EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 48.0f * ui_scale))) {
+                    if (TouchButton("SAFE EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 48.0f * ui_scale))) {
                         g_should_exit = true;
                     }
                 }
@@ -873,6 +967,8 @@ namespace ui::menu {
 
         ImGui::PopStyleVar(7);
         ImGui::PopStyleColor(20);
+
+        cfg::publish_runtime();
 
         // Deferred safe exit outside of ImGui frame
         if (g_should_exit) {

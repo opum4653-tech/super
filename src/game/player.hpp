@@ -35,6 +35,7 @@ struct PlayerData {
     bool     isKnocked;     // True if player is knocked down (PhyXData + 0x20 + 0x10 == 8)
     float    distance;      // Distance in meters from local player to this enemy
     int      curHP;         // Live Health Points (PRIDataPool -> Datas[0] -> Value)
+    bool     hpValid;       // True only when the HP chain actually resolved; false = unknown, not dead
     int      maxHP;         // Maximum Health Points (PRIDataPool -> Datas[1] -> Value)
     int      curArmor;      // Armor Points (PRIDataPool -> Datas[4] -> Value)
     bool     isFiring;      // True if enemy is currently shooting (Player::IsFiring, 0x850/0x848)
@@ -48,7 +49,7 @@ struct PlayerData {
           Head(Vector3::Zero()), Toe(Vector3::Zero()),
           headWorld(Vector3::Zero()),
           isVisible(false), isBot(false), isKnocked(false), distance(0.f),
-          curHP(0), maxHP(0), curArmor(0),
+          curHP(0), hpValid(false), maxHP(0), curArmor(0),
           isFiring(false), isGrounded(true), speed(0.f),
           weaponType(-1)
     { name[0] = 0; }

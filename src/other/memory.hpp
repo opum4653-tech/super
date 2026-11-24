@@ -117,12 +117,11 @@ inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
 
 inline bool mem_read(uint64_t a, void* b, size_t l) {
     if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
+    // Clear first: a KPM engine that reports success without actually copying
+    // must never leave stale bytes in caller buffers (PlayerSpan, matrix, etc.).
+    memset(b, 0, l);
     kpm.initialize(proc::pid);
-    if (!kpm.read(static_cast<uintptr_t>(a), b, l)) {
-        memset(b, 0, l);
-        return false;
-    }
-    return true;
+    return kpm.read(static_cast<uintptr_t>(a), b, l);
 }
 
 inline bool mem_write(uint64_t a, const void* b, size_t l) {
@@ -139,6 +138,35 @@ template<typename T> inline T rpm(uint64_t a) {
 
 template<typename T> inline bool wpm(uint64_t a, const T& d) {
     return mem_write(a, &d, sizeof(T));
+}
+
+// Small-write path with read-back verification. KPM can report a successful
+// prctl while the target value is later overwritten by the game thread, or
+// while a stale engine silently drops the copy. AimRotation is 16 bytes, so
+// the extra read is cheap and gives a real success signal instead of a blind
+// "write returned 0" assumption.
+inline bool mem_write_verified(uint64_t a, const void* b, size_t l) {
+    if (b == nullptr || l == 0) return false;
+    if (!mem_write(a, b, l)) return false;
+
+    constexpr size_t kVerifyMax = 64;
+    if (l > kVerifyMax) return true; // large buffers: engine result is the only signal
+
+    uint8_t back[kVerifyMax];
+    if (!mem_read(a, back, l)) {
+        kpm.diag.failed_verified_writes++;
+        return false;
+    }
+    if (memcmp(back, b, l) != 0) {
+        kpm.diag.failed_verified_writes++;
+        return false;
+    }
+    kpm.diag.verified_writes++;
+    return true;
+}
+
+template<typename T> inline bool wpm_verified(uint64_t a, const T& d) {
+    return mem_write_verified(a, &d, sizeof(T));
 }
 
 // Confirm one cached pid still belongs to the target.

@@ -26,6 +26,7 @@
 #include "../ui/cfg.hpp"
 #include "../protect/oxorany.hpp"
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -44,15 +45,36 @@ namespace data {
     std::atomic<uint64_t>    localPlayerAddr{0};
     std::atomic<bool>        inMatch{false};
     matrix                   viewMatrix{};
+    std::mutex               g_viewMutex;
+
+    std::atomic<uint64_t>    selectedMatchAddr{0};
+    std::atomic<uint64_t>    selectedDictAddr{0};
+    std::atomic<int>         selectedEnemyCount{0};
+    std::atomic<int>         selectedDictCount{0};
+
+    matrix get_view_matrix() {
+        std::lock_guard<std::mutex> lk(g_viewMutex);
+        return viewMatrix;
+    }
+
+    static void clear_resolution_telemetry() {
+        selectedMatchAddr.store(0);
+        selectedDictAddr.store(0);
+        selectedEnemyCount.store(0);
+        selectedDictCount.store(0);
+    }
+
+    // State-transition signal only: not an entity cache or fallback value.
+    static std::atomic<bool> s_scrapeReady{false};
+    static void set_scrape_ready(bool ready) {
+        if (s_scrapeReady.exchange(ready, std::memory_order_relaxed) != ready) {
+            cfg::notify_state_change();
+        }
+    }
 
     // Internal background thread state
     static std::atomic<bool> g_run{false};
     static std::thread       g_thread;
-
-    // Consecutive camera-resolution failures. A single bad read is tolerated to
-    // avoid ESP flicker; sustained failure clears projections instead of aiming
-    // with last frame's (stale) camera matrix.
-    static int s_matrixFailCount = 0;
 
     // ------------------------------------------------------------------------
     // CAMERA MATRIX INTEGRITY VALIDATION (Cross-referenced from pewpew)
@@ -111,26 +133,38 @@ namespace data {
     // Index 1 (+0x28): MaxHP (ReplicationData*)
     // Index 4 (+0x40): CurAP (ReplicationData*, Armor Points)
     // Value is stored at +0x18 (Offsets::HP_Value) inside each ReplicationData.
-    static void readHealthAndArmor(uint64_t pool, int& curHP, int& maxHP, int& curArmor,
+    static bool readHealthAndArmor(uint64_t pool, int& curHP, int& maxHP, int& curArmor,
                                    bool wantArmor = true) {
         curHP = 0;
         maxHP = 0;
         curArmor = 0;
-        if (!pool) return;
-        auto datas = rpm<uint64_t>(pool + Offsets::HP_List);
-        if (!datas) return;
+        if (!pool) return false;
 
-        // 1. Live Current Health (Proven Index 0 at Offsets::HP_Entry = 0x20)
-        auto elem0 = rpm<uint64_t>(datas + Offsets::HP_Entry);
-        if (elem0) {
-            curHP = rpm<int>(elem0 + Offsets::HP_Value);
+        uint64_t datas = 0;
+        if (!mem_read(pool + Offsets::HP_List, &datas, sizeof(datas)) || datas <= 0x10000) {
+            return false;
         }
 
-        // 2. Live Maximum Health (Index 1 at 0x28 if registered)
-        auto elem1 = rpm<uint64_t>(datas + 0x28);
-        if (elem1 && elem1 > 0x10000) {
-            int m = rpm<int>(elem1 + Offsets::HP_Value);
-            if (m > 0 && m <= 1000) maxHP = m;
+        // 1. Live Current Health (Proven Index 0 at Offsets::HP_Entry = 0x20).
+        // Use status-returning reads here: a failed KPM read used to leave curHP
+        // at 0, which then looked like a dead player and blanked the target list.
+        uint64_t elem0 = 0;
+        const bool hpPtrOk = mem_read(datas + Offsets::HP_Entry, &elem0, sizeof(elem0)) &&
+                             elem0 > 0x10000;
+        bool hpValueOk = false;
+        if (hpPtrOk) {
+            hpValueOk = mem_read(elem0 + Offsets::HP_Value, &curHP, sizeof(curHP));
+        }
+
+        // 2. Live Maximum Health (Index 1 at 0x28 if registered).
+        bool maxHPRead = false;
+        uint64_t elem1 = 0;
+        if (mem_read(datas + 0x28, &elem1, sizeof(elem1)) && elem1 > 0x10000) {
+            int m = 0;
+            if (mem_read(elem1 + Offsets::HP_Value, &m, sizeof(m)) && m > 0 && m <= 1000) {
+                maxHP = m;
+                maxHPRead = true;
+            }
         }
         if (maxHP < curHP) maxHP = curHP;
         if (maxHP <= 0) maxHP = (curHP > 0 ? curHP : 200);
@@ -138,11 +172,20 @@ namespace data {
         // 3. Live Armor Points (Index 4 at 0x40) — skip entirely when the
         //    armor bar is off; this is 2 syscalls per enemy per tick.
         if (wantArmor) {
-            auto elem4 = rpm<uint64_t>(datas + 0x40);
-            if (elem4 && elem4 > 0x10000) {
-                curArmor = rpm<int>(elem4 + Offsets::HP_Value);
+            uint64_t elem4 = 0;
+            if (mem_read(datas + 0x40, &elem4, sizeof(elem4)) && elem4 > 0x10000) {
+                int armor = 0;
+                if (mem_read(elem4 + Offsets::HP_Value, &armor, sizeof(armor)) &&
+                    armor >= 0 && armor <= 1000) {
+                    curArmor = armor;
+                }
             }
         }
+
+        // A real dead player has 0 HP but a readable chain. A broken chain has
+        // no pointer, an out-of-range value, or no HP/maxHP signal at all.
+        const bool saneHP = hpValueOk && curHP >= 0 && curHP <= 10000;
+        return hpPtrOk && saneHP && (curHP > 0 || maxHPRead);
     }
 
     // ------------------------------------------------------------------------
@@ -181,18 +224,19 @@ namespace data {
     // ------------------------------------------------------------------------
     // BONE PROJECTION HELPER
     // ------------------------------------------------------------------------
-    static Vector3 boneScreen(uint64_t node) {
+    static Vector3 boneScreen(uint64_t node, const matrix& vm) {
         if (!node) return Vector3::Zero();
         Vector3 w = GetNodePosition(node);
         if (w == Vector3::Zero()) return Vector3::Zero();
-        return WorldToScreenPoint(viewMatrix, w);
+        return WorldToScreenPoint(vm, w);
     }
 
     // ------------------------------------------------------------------------
     // GROUND LOOT SCANNER
     // ------------------------------------------------------------------------
     // Traverses MetaManager.DropObjects dictionary to locate weapons, armor, ammo
-    static void scanLoot(uint64_t BaseGame, const Vector3& localPos) {
+    static void scanLoot(uint64_t BaseGame, const Vector3& localPos, const matrix& vm) {
+        const cfg::RuntimeConfig rc = cfg::runtime();
         std::vector<LootItem> tmp;
 
         uint64_t match = rpm<uint64_t>(BaseGame + Offsets::BaseGame_Match);
@@ -218,9 +262,9 @@ namespace data {
             if (w == Vector3::Zero()) continue;
 
             float dist = calculate_distance(localPos, w);
-            if (cfg::esp::loot_range > 0.0f && dist > cfg::esp::loot_range) continue;
+            if (rc.espLootRange > 0.0f && dist > rc.espLootRange) continue;
 
-            Vector3 sc = WorldToScreenPoint(viewMatrix, w);
+            Vector3 sc = WorldToScreenPoint(vm, w);
             if (sc.x < 0) continue;
 
             LootItem li;
@@ -246,10 +290,64 @@ namespace data {
         std::vector<PlayerData> tmp;
         tmp.reserve(64);
 
+        // Single immutable config snapshot for this scrape tick.
+        const cfg::RuntimeConfig rc = cfg::runtime();
+
+        // Menu-off means game-off: no chain reads, no camera reads, no entity
+        // reads, no cached/fallback local player. Official game state untouched.
+        if (!rc.anyFeature) {
+            inMatch.store(false);
+            localPlayerAddr.store(0);
+            set_scrape_ready(false);
+            clear_resolution_telemetry();
+            {
+                std::lock_guard<std::mutex> lk(players_mutex);
+                if (!players.empty()) players.clear();
+            }
+            {
+                std::lock_guard<std::mutex> lk(loots_mutex);
+                if (!loots.empty()) loots.clear();
+            }
+            return;
+        }
+
         // 1. Resolve Base Chain (Free Fire Max: maxff.h primary 0xAD68E18, STORM_MODS alt 0xAD6DC18)
-        uint64_t BaseGame = 0;
-        uint64_t m_Match = 0;
-        uint64_t localPlayer = 0;
+        // Do not take the first non-null Match. Training and a live BR match can
+        // both leave old Match objects mapped; choosing wrong here makes every
+        // later read point at a dead/local-only entity set.
+        struct ChainCandidate {
+            uint64_t base = 0;
+            uint64_t match = 0;
+            uint64_t local = 0;
+            int score = 0;
+        };
+        ChainCandidate best;
+
+        auto score_chain = [&](uint64_t bg, uint64_t match) {
+            if (!bg || bg < 0x10000 || !match || match < 0x10000) return;
+            uint64_t lp = rpm<uint64_t>(match + Offsets::Match_LocalPlayer);
+            int score = is_valid_ptr(lp) ? 1000 : 0;
+
+            // A live match dictionary with real enemy pointers outranks a stale
+            // lobby/training dictionary that merely has count > 0.
+            const uint64_t dicts[] = {
+                rpm<uint64_t>(bg + Offsets::Match_PlayerDict),
+                rpm<uint64_t>(bg + 0xC8),
+                rpm<uint64_t>(match + Offsets::Match_PlayerDict),
+                rpm<uint64_t>(match + 0xC8)
+            };
+            int bestDictCount = 0;
+            for (uint64_t d : dicts) {
+                MonoDictionary td(d);
+                if (td.valid) bestDictCount = std::max(bestDictCount, td.getNumValues());
+            }
+            score += std::min(bestDictCount, 100) * 10;
+
+            int ms = rpm<int>(match + Offsets::MatchIsRunning);
+            if (ms == 1 || (ms != 0 && ms != 4)) score += 50;
+
+            if (score > best.score) best = { bg, match, lp, score };
+        };
 
         const uintptr_t gfOffsets[] = {
             oxorany(Offsets::GameFacade),
@@ -274,30 +372,21 @@ namespace data {
                 };
 
                 for (uint64_t bg : bgCandidates) {
-                    if (!bg || bg < 0x10000) continue;
-
-                    uint64_t match = rpm<uint64_t>(bg + Offsets::BaseGame_Match);
-                    if (match && match > 0x10000) {
-                        BaseGame = bg;
-                        m_Match = match;
-                        localPlayer = rpm<uint64_t>(m_Match + Offsets::Match_LocalPlayer);
-                        break;
-                    }
+                    score_chain(bg, rpm<uint64_t>(bg + Offsets::BaseGame_Match));
                 }
-                if (BaseGame) break;
             }
-            if (BaseGame) break;
         }
 
-        if (!BaseGame || !m_Match) return;
+        uint64_t BaseGame = best.base;
+        uint64_t m_Match  = best.match;
+        uint64_t localPlayer = best.local;
 
-        // In matches, localPlayer may transiently read 0 during parachute/respawn.
-        // Maintain savedLocalPlayer persistence (matches STORM_MODS line 986).
-        static uint64_t savedLocalPlayer = 0;
-        if (localPlayer != 0) {
-            savedLocalPlayer = localPlayer;
-        } else if (savedLocalPlayer != 0 && addr_valid(savedLocalPlayer)) {
-            localPlayer = savedLocalPlayer;
+        if (!BaseGame || !m_Match) {
+            inMatch.store(false);
+            localPlayerAddr.store(0);
+            set_scrape_ready(false);
+            clear_resolution_telemetry();
+            return;
         }
 
         int matchStateMatch = rpm<int>(m_Match + Offsets::MatchIsRunning);
@@ -309,8 +398,9 @@ namespace data {
 
         // Clear states if match is over or in lobby
         if (!matchActive) {
-            savedLocalPlayer = 0;
             localPlayerAddr.store(0);
+            set_scrape_ready(false);
+            clear_resolution_telemetry();
             {
                 std::lock_guard<std::mutex> lk(players_mutex);
                 if (!players.empty()) players.clear();
@@ -322,17 +412,9 @@ namespace data {
             return;
         }
 
-        // Feature-muted mode: user turned off all ESP & Aim switches in menu.
-        // Return immediately without reading camera, bones, or enemy lists.
-        if (!cfg::any_feature_enabled()) {
-            {
-                std::lock_guard<std::mutex> lk(players_mutex);
-                if (!players.empty()) players.clear();
-            }
-            return;
-        }
-
         if (!m_Match) {
+            set_scrape_ready(false);
+            clear_resolution_telemetry();
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
@@ -342,6 +424,8 @@ namespace data {
         localPlayerAddr.store(localPlayer ? localPlayer : 0);
 
         if (!localPlayer) {
+            set_scrape_ready(false);
+            clear_resolution_telemetry();
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
@@ -355,7 +439,10 @@ namespace data {
             if (!intPtrCandidate) return false;
             matrix vm = rpm<matrix>(intPtrCandidate + Offsets::Camera_Matrix);
             if (is_valid_matrix(vm)) {
-                viewMatrix = vm;
+                {
+                    std::lock_guard<std::mutex> lk(g_viewMutex);
+                    viewMatrix = vm;
+                }
                 matrix_resolved = true;
                 return true;
             }
@@ -407,20 +494,20 @@ namespace data {
             }
         }
 
-        // Projecting with last frame's matrix puts enemies at stale screen
-        // positions, which makes the aim steer behind moving targets ("drag").
-        // Tolerate up to 3 transient read failures, then drop the snapshot.
+        // No stale matrix tolerance. A camera read that is not valid right now
+        // drops this tick; the game keeps its own state until a fresh read
+        // succeeds. No failure-count cache.
         if (!matrix_resolved) {
-            if (++s_matrixFailCount > 3) {
-                std::lock_guard<std::mutex> lk(players_mutex);
-                players.clear();
-                return;
-            }
-        } else {
-            s_matrixFailCount = 0;
+            set_scrape_ready(false);
+            selectedEnemyCount.store(0);
+            std::lock_guard<std::mutex> lk(players_mutex);
+            players.clear();
+            return;
         }
-        if (!is_valid_matrix(viewMatrix)) {
-            s_matrixFailCount = 0;
+        const matrix vmNow = get_view_matrix();
+        if (!is_valid_matrix(vmNow)) {
+            set_scrape_ready(false);
+            selectedEnemyCount.store(0);
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
@@ -431,12 +518,12 @@ namespace data {
         uint64_t headNode = rpm<uint64_t>(localPlayer + Offsets::Bone_Head);
         if (headNode) localPos = GetNodePosition(headNode);
         if (localPos == Vector3::Zero() || !std::isfinite(localPos.x)) {
-            localPos = GetCameraPosition(viewMatrix);
+            localPos = GetCameraPosition(vmNow);
         }
 
         // 4. Ground Loot Scan
-        if (cfg::esp::loot) {
-            scanLoot(BaseGame, localPos);
+        if (rc.espLoot) {
+            scanLoot(BaseGame, localPos, vmNow);
         } else {
             std::lock_guard<std::mutex> lk(loots_mutex);
             loots.clear();
@@ -450,20 +537,57 @@ namespace data {
             rpm<uint64_t>(m_Match + 0xC8)                       // 0xC8 on Match
         };
 
+        // Pick the dictionary with the most usable enemy pointers, not simply
+        // the first valid one. A stale 0xC0 dictionary can hold only the local
+        // player while the live BR entity list sits at 0xC8 / m_Match.
         MonoDictionary dict(0);
+        int bestDictScore = -1;
+        int bestSampleCount = 0;
+        int bestDictTotal = 0;
+        uint64_t bestDictPointer = 0;
         for (uint64_t candAddr : dictCandidates) {
             if (!candAddr || candAddr < 0x10000) continue;
             MonoDictionary testDict(candAddr);
-            if (testDict.valid && testDict.getNumValues() > 0) {
-                dict = testDict;
-                break;
+            if (!testDict.valid) continue;
+
+            // Sample up to 8 real entities. Raw pointer count alone can let a
+            // stale dictionary full of valid-looking heap addresses win.
+            int usable = 0;
+            int checked = 0;
+            int attempts = 0;
+            MonoDictionary::EntryBlock scoreBlk{};
+            for (int i = 0; i < testDict.getNumValues() && checked < 8 && attempts < 24;
+                 i += MonoDictionary::kBlockSize) {
+                if (!testDict.read_block(i, scoreBlk)) continue;
+                for (int j = 0; j < scoreBlk.count && checked < 8 && attempts < 24; j++) {
+                    uint64_t e = scoreBlk.value[j];
+                    if (e < 0x100000000 || e == localPlayer) continue;
+                    attempts++;
+                    PlayerSpan es(e);
+                    if (es.at<bool>(Offsets::Player_IsDead)) continue;
+                    if (!es.at<uint64_t>(Offsets::Bone_Head)) continue;
+                    usable++;
+                    checked++;
+                }
             }
-            if (testDict.valid && !dict.valid) {
+
+            int score = usable * 100 + std::min(testDict.getNumValues(), 50);
+            if (score > bestDictScore) {
+                bestDictScore = score;
+                bestSampleCount = usable;
+                bestDictTotal = testDict.getNumValues();
+                bestDictPointer = candAddr;
                 dict = testDict;
             }
         }
 
+        selectedDictAddr.store(bestDictPointer);
+        selectedDictCount.store(bestSampleCount > 0 ? bestDictTotal : 0);
+        selectedMatchAddr.store(m_Match);
+
         if (!dict.valid) {
+            set_scrape_ready(false);
+            selectedEnemyCount.store(0);
             std::lock_guard<std::mutex> lk(players_mutex);
             players.clear();
             return;
@@ -472,13 +596,15 @@ namespace data {
         // Resolve which per-entity queries are actually needed this tick.
         // Every one of these used to run for every enemy on every frame even
         // when the corresponding overlay element was switched off.
-        const bool wantName    = cfg::esp::name;
-        const bool wantWeapon  = cfg::esp::weapon;
-        const bool wantArmor   = cfg::esp::armor;
-        const bool wantToe     = cfg::esp::box || cfg::esp::health || cfg::esp::armor ||
-                                 cfg::esp::name || cfg::esp::distance || cfg::esp::weapon ||
-                                 cfg::esp::tracer || cfg::esp::firing_ind || cfg::esp::bot_tag;
-        const bool wantKnocked = cfg::esp::box; // aim no longer scores knocked state
+        const bool wantName    = rc.espName;
+        const bool wantWeapon  = rc.espWeapon;
+        const bool wantArmor   = rc.espArmor;
+        const bool wantToe     = rc.espBox || rc.espHealth || rc.espArmor ||
+                                 rc.espName || rc.espDistance || rc.espWeapon ||
+                                 rc.espTracer || rc.espFiringInd || rc.espBotTag;
+        // Aim penalises knocked targets in target.hpp, so the flag must be read
+        // whenever aim is enabled, not only when the ESP box is drawn.
+        const bool wantKnocked = rc.espBox || rc.aimEnable;
 
         int nv = dict.getNumValues();
         MonoDictionary::EntryBlock blk{};
@@ -498,13 +624,10 @@ namespace data {
             bool isBot = span.at<bool>(Offsets::Player_IsBot);
 
             int curHP = 0, maxHP = 0, curArmor = 0;
-            // HP is needed for aim validity; armor only when the armor bar is on.
-            readHealthAndArmor(span.at<uint64_t>(Offsets::Player_HP), curHP, maxHP,
-                               curArmor, wantArmor);
-            if (curHP <= 0) {
-                curHP = 200;
-                maxHP = 200;
-            }
+            // hpValid separates a real 0 HP from a broken HP pointer chain.
+            const bool hpValid = readHealthAndArmor(span.at<uint64_t>(Offsets::Player_HP),
+                                                    curHP, maxHP, curArmor, wantArmor);
+            if (maxHP <= 0) maxHP = 200;
 
             bool visible = true;
             auto avatarMgr = span.at<uint64_t>(Offsets::Player_Avatar);
@@ -538,10 +661,10 @@ namespace data {
             // Official Game Range: Zero artificial distance capping.
             // Every active entity spawned in game memory is processed.
             if (dist < 0.8f) continue;
-            if (cfg::esp::max_range > 0.0f && dist > cfg::esp::max_range) continue;
+            if (rc.espMaxRange > 0.0f && dist > rc.espMaxRange) continue;
 
             // 2D Screen Projections
-            Vector3 headScreen = WorldToScreenPoint(viewMatrix, headWorld);
+            Vector3 headScreen = WorldToScreenPoint(vmNow, headWorld);
             if (headScreen.z < 0.001f) continue;
 
             // Toe is only used to size ESP boxes. The drag shot is head-only,
@@ -549,18 +672,18 @@ namespace data {
             Vector3 toeScreen = Vector3::Zero();
             if (wantToe) {
                 uint64_t toeNode = span.at<uint64_t>(Offsets::Bone_LeftToe);
-                toeScreen = toeNode ? boneScreen(toeNode) : Vector3::Zero();
+                toeScreen = toeNode ? boneScreen(toeNode, vmNow) : Vector3::Zero();
                 if (toeScreen.z < 0.001f || toeScreen == Vector3::Zero()) {
                     Vector3 toeWorld = headWorld;
                     toeWorld.y -= 1.8f;
-                    toeScreen = WorldToScreenPoint(viewMatrix, toeWorld);
+                    toeScreen = WorldToScreenPoint(vmNow, toeWorld);
                     if (toeScreen.z < 0.001f) {
                         // Last resort: W2S maps world dy to -cy * m22 * dy / w.
                         float w = headScreen.z;
                         if (w < 0.1f) w = 0.1f;
-                        float heightPx = (g_sh * 0.5f) * fabsf(viewMatrix.m22) * 1.8f / w;
+                        float heightPx = (rc.screenH * 0.5f) * fabsf(vmNow.m22) * 1.8f / w;
                         if (!std::isfinite(heightPx) || heightPx <= 0.0f) heightPx = 4.0f;
-                        if (heightPx > g_sh) heightPx = g_sh;
+                        if (heightPx > rc.screenH) heightPx = rc.screenH;
                         toeScreen = Vector3(headScreen.x, headScreen.y + heightPx, headScreen.z);
                     }
                 }
@@ -594,6 +717,7 @@ namespace data {
             pd.isKnocked  = isKnocked;
             pd.distance   = dist;
             pd.curHP      = curHP;
+            pd.hpValid    = hpValid;
             pd.maxHP      = maxHP;
             pd.curArmor   = curArmor;
             pd.isFiring   = span.at<bool>(Offsets::Player_IsFiring);
@@ -609,7 +733,9 @@ namespace data {
         {
             std::lock_guard<std::mutex> lk(players_mutex);
             players.swap(tmp);
+            selectedEnemyCount.store(static_cast<int>(players.size()));
         }
+        set_scrape_ready(true); // Wake aim on a fresh real-time snapshot only.
     }
 
     // ------------------------------------------------------------------------
@@ -630,8 +756,18 @@ namespace data {
     void thread_stop() {
         if (!g_run.exchange(false)) return;
         if (g_thread.joinable()) g_thread.join();
-        std::lock_guard<std::mutex> lk(players_mutex);
-        players.clear();
+        set_scrape_ready(false);
+        localPlayerAddr.store(0);
+        inMatch.store(false);
+        clear_resolution_telemetry();
+        {
+            std::lock_guard<std::mutex> lk(players_mutex);
+            players.clear();
+        }
+        {
+            std::lock_guard<std::mutex> lk(loots_mutex);
+            loots.clear();
+        }
     }
 
 } // namespace data

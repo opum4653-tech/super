@@ -29,6 +29,7 @@ namespace aimbot {
     // ------------------------------------------------------------------------
     inline TargetAcquisitionResult acquire_target(uint64_t localPlayer) {
         TargetAcquisitionResult result;
+        const cfg::RuntimeConfig rc = cfg::runtime();
         if (!is_valid_ptr(localPlayer)) return result;
 
         // Verify local player is alive
@@ -41,7 +42,7 @@ namespace aimbot {
         result.isFiring = isFiring;
 
         bool triggerActive = false;
-        if (cfg::aim::trigger_mode == 1) {
+        if (rc.aimTriggerMode == 1) {
             triggerActive = true; // Always In FOV
         } else {
             triggerActive = isFiring; // When Firing (Default & Recommended)
@@ -58,24 +59,27 @@ namespace aimbot {
             return result;
         }
 
-        float screenCx = g_sw * 0.5f;
-        float screenCy = g_sh * 0.5f;
-        float fovLimit = cfg::aim::get_fov_radius();
+        float screenCx = rc.screenW * 0.5f;
+        float screenCy = rc.screenH * 0.5f;
+        float fovLimit = rc.aimFovRadius;
 
         float bestScore = 9999999.0f;
         const PlayerData* bestEnemy = nullptr;
 
         // Dynamic crosshair distance scan (matches STORM_MODS lines 1123-1170)
         for (const auto& enemy : enemies) {
-            // Must be alive and in front of camera
-            if (enemy.Head.z < 0.001f || enemy.curHP <= 0) continue;
-            if (cfg::aim::ignore_bots && enemy.isBot) continue;
-            if (cfg::aim::max_distance > 0.0f && enemy.distance > cfg::aim::max_distance) continue;
+            // A resolved 0 HP means dead. An unresolved HP chain means unknown,
+            // not dead — dropping those would blank the whole target list when
+            // a match uses a different PRIDataPool layout.
+            if (enemy.Head.z < 0.001f) continue;
+            if (enemy.hpValid && enemy.curHP <= 0) continue;
+            if (rc.aimIgnoreBots && enemy.isBot) continue;
+            if (rc.aimMaxDistance > 0.0f && enemy.distance > rc.aimMaxDistance) continue;
 
-            // Screen boundary check (matches STORM_MODS line 1137)
-            if (enemy.Head.x < 0 || enemy.Head.x > g_sw ||
-                enemy.Head.y < 0 || enemy.Head.y > g_sh) continue;
-
+            // No hard screen-rect cull: g_sw/g_sh are captured once at overlay
+            // start, so a mid-match rotation can make valid heads look "outside"
+            // the cached rectangle. The FOV radius below already rejects targets
+            // that are practically unreachable from the crosshair.
             float dxHead = enemy.Head.x - screenCx;
             float dyHead = enemy.Head.y - screenCy;
             float crosshairDist = sqrtf(dxHead * dxHead + dyHead * dyHead);
@@ -84,11 +88,12 @@ namespace aimbot {
             if (fovLimit > 0.0f && crosshairDist > fovLimit) continue;
 
             float score = crosshairDist;
-            if (cfg::aim::priority_mode == 1) { // Lowest HP
+            if (rc.aimPriorityMode == 1) { // Lowest HP
                 float fovNorm = (fovLimit > 0.0f) ? (crosshairDist / fovLimit) : 0.0f;
                 if (fovNorm > 1.0f) fovNorm = 1.0f;
-                score = (float)enemy.curHP + fovNorm * 50.0f;
-            } else if (cfg::aim::priority_mode == 2) { // 3D Distance
+                float hpForScore = enemy.hpValid ? static_cast<float>(enemy.curHP) : 200.0f;
+                score = hpForScore + fovNorm * 50.0f;
+            } else if (rc.aimPriorityMode == 2) { // 3D Distance
                 score = enemy.distance;
             }
 

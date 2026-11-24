@@ -84,7 +84,7 @@ struct KpmDiagnostics {
     int  selected_engine = KPM_ENGINE_AUTO;
     int  active_engine   = KPM_ENGINE_AUTO;
     bool is_connected    = false;
-    bool auto_fallback   = true;  // Safe fallback if KPM is not loaded
+    bool auto_fallback   = false; // Menu-controlled only; never enabled by default
 
     // TB KPM Probe & Test
     int  tb_ret          = -999;
@@ -102,10 +102,14 @@ struct KpmDiagnostics {
     bool syscall_works   = false;
 
     // Counters
-    uint64_t total_reads  = 0;
-    uint64_t failed_reads = 0;
-    uint32_t last_magic   = 0;
-    char status_str[128]  = "Initializing...";
+    uint64_t total_reads          = 0;
+    uint64_t failed_reads         = 0;
+    uint64_t total_writes         = 0;
+    uint64_t failed_writes        = 0;
+    uint64_t verified_writes      = 0;
+    uint64_t failed_verified_writes = 0;
+    uint32_t last_magic           = 0;
+    char status_str[128]          = "Initializing...";
 };
 
 class c_kpm {
@@ -184,6 +188,13 @@ public:
             }
 
             // Variant 2: Standard Neo KPM style (&cmd in arg2)
+            // Reset the command first: variant 1 may have left a non-zero result
+            // in cmd, which would make a successful variant 2 look like a failure.
+            memset(&cmd, 0, sizeof(cmd));
+            cmd.op   = NA_CMD_READ_MEM;
+            cmd.pid  = (uint32_t)target_pid;
+            cmd.addr = (uint64_t)curr_addr;
+            cmd.size = (uint32_t)chunk;
             errno = 0;
             r = syscall(__NR_prctl, NA_PRCTL_MAGIC, (unsigned long)&cmd, 0, 0, 0);
             diag.neo_ret = (int)r;
@@ -225,6 +236,13 @@ public:
                 continue;
             }
 
+            // Variant 2: same reset rule as the read path.
+            memset(&cmd, 0, sizeof(cmd));
+            cmd.op   = NA_CMD_WRITE_MEM;
+            cmd.pid  = (uint32_t)target_pid;
+            cmd.addr = (uint64_t)curr_addr;
+            cmd.size = (uint32_t)chunk;
+            memcpy(cmd.data, ptr, chunk);
             r = syscall(__NR_prctl, NA_PRCTL_MAGIC, (unsigned long)&cmd, 0, 0, 0);
             if (r == 0 && cmd.result == 0) {
                 ptr += chunk;
@@ -298,7 +316,9 @@ public:
         diag.neo_ret = (int)r;
         diag.neo_errno = errno;
         diag.neo_result = cmd.result;
-        diag.neo_works = (r == 0 && (cmd.result == 0 || errno != EINVAL));
+        // A zero return alone is not proof. Neo GET_PID must also report success
+        // and a positive target pid; otherwise KPM is not actually loaded.
+        diag.neo_works = (r == 0 && cmd.result == 0 && cmd.pid > 0);
 
         // 3. Test Syscall
         if (target_pid > 0 && target_pid != getpid()) {
@@ -336,7 +356,12 @@ public:
     }
 
     void initialize(pid_t target_pid) {
+        if (this->pid == target_pid) return;
+        // A game restart changes the pid. Any previously negotiated engine
+        // belongs to the dead process and must be re-probed on the next read.
         this->pid = target_pid;
+        diag.active_engine = KPM_ENGINE_AUTO;
+        diag.is_connected  = false;
     }
 
     void set_pid(pid_t target_pid) {
@@ -429,35 +454,39 @@ public:
     // ------------------------------------------------------------------------
     bool write(uintptr_t addr, const void *buffer, size_t size) {
         if (this->pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
+        diag.total_writes++;
+
+        bool ok = false;
         int mode = diag.selected_engine;
         if (mode == KPM_ENGINE_AUTO) mode = diag.active_engine;
 
         if (mode == KPM_ENGINE_TB) {
-            if (tb_kpm_write(this->pid, addr, buffer, size)) return true;
+            ok = tb_kpm_write(this->pid, addr, buffer, size);
+            if (ok) diag.active_engine = KPM_ENGINE_TB;
         } else if (mode == KPM_ENGINE_NEO) {
-            if (neo_kpm_write(this->pid, addr, buffer, size)) return true;
+            ok = neo_kpm_write(this->pid, addr, buffer, size);
+            if (ok) diag.active_engine = KPM_ENGINE_NEO;
         } else if (mode == KPM_ENGINE_SYSCALL) {
-            return syscall_write(this->pid, addr, buffer, size);
+            ok = syscall_write(this->pid, addr, buffer, size);
+            if (ok) diag.active_engine = KPM_ENGINE_SYSCALL;
         } else {
-            // AUTO MODE: Try KPM Ring-0 drivers first
-            if (tb_kpm_write(this->pid, addr, buffer, size)) {
+            // AUTO MODE: Try KPM Ring-0 drivers first, then the safe fallback.
+            ok = tb_kpm_write(this->pid, addr, buffer, size);
+            if (ok) {
                 diag.active_engine = KPM_ENGINE_TB;
-                return true;
-            }
-            if (neo_kpm_write(this->pid, addr, buffer, size)) {
-                diag.active_engine = KPM_ENGINE_NEO;
-                return true;
-            }
-            if (diag.auto_fallback) {
-                return syscall_write(this->pid, addr, buffer, size);
+            } else {
+                ok = neo_kpm_write(this->pid, addr, buffer, size);
+                if (ok) diag.active_engine = KPM_ENGINE_NEO;
             }
         }
 
-        // Secondary fallback if primary engine returned failure
-        if (diag.auto_fallback) {
-            return syscall_write(this->pid, addr, buffer, size);
+        if (!ok && diag.auto_fallback) {
+            ok = syscall_write(this->pid, addr, buffer, size);
+            if (ok) diag.active_engine = KPM_ENGINE_SYSCALL;
         }
-        return false;
+
+        if (!ok) diag.failed_writes++;
+        return ok;
     }
 
     template <typename T>
@@ -482,6 +511,11 @@ public:
         if (syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_GET_PID, (unsigned long)&cmd, 0, 0) == 0 && cmd.result == 0 && cmd.pid > 0) {
             return static_cast<pid_t>(cmd.pid);
         }
+        // Reset before the alternate calling convention; a stale cmd.result
+        // from variant 1 would otherwise hide a successful variant 2.
+        memset(&cmd, 0, sizeof(cmd));
+        cmd.op = NA_CMD_GET_PID;
+        strncpy(cmd.pkg, pkg_name, sizeof(cmd.pkg) - 1);
         if (syscall(__NR_prctl, NA_PRCTL_MAGIC, (unsigned long)&cmd, 0, 0, 0) == 0 && cmd.result == 0 && cmd.pid > 0) {
             return static_cast<pid_t>(cmd.pid);
         }

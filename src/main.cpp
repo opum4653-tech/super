@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <sys/prctl.h>
 #include <csignal>
+#include <signal.h>
 #include <string>
 #include <atomic>
 
@@ -181,7 +182,14 @@ static int start_overlay() {
     // without blocking for target game launch. Once game starts, starts data & aim threads.
     std::thread attach_worker([]() {
         while (main_thread_flag) {
-            proc::pid = get_pid();
+            // Real-time lifecycle only: reuse a still-live cached target,
+            // otherwise re-resolve. No artificial timer drives this loop.
+            if (proc::pid_cache > 0 && pid_alive(proc::pid_cache)) {
+                proc::pid = proc::pid_cache;
+            } else {
+                proc::pid = get_pid();
+            }
+
             if (proc::pid > 0) {
                 kpm.initialize(proc::pid);
                 proc::lib = get_lib();
@@ -192,20 +200,21 @@ static int start_overlay() {
                         data::thread_start();
                         aimbot::thread_start();
 
-                        // Monitor target lifecycle during active gameplay.
-                        // When game exits or restarts, stop reader threads cleanly.
+                        // Exit the active session the moment the target PID
+                        // disappears. No timed polling window.
                         while (main_thread_flag) {
-                            if (get_pid() <= 0) {
+                            if (proc::pid <= 0 || ::kill(proc::pid, 0) != 0) {
                                 aimbot::thread_stop();
                                 data::thread_stop();
+                                proc::pid_cache = 0;
                                 break;
                             }
-                            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                            std::this_thread::yield();
                         }
                     }
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            std::this_thread::yield();
         }
     });
     attach_worker.detach();

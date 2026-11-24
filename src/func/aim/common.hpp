@@ -30,7 +30,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
-#include <chrono>
+#include <atomic>
 #include <cstdint>
 #include <unistd.h>
 

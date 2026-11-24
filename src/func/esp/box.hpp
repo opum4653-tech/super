@@ -7,7 +7,7 @@
 // SYSTEM ROLE:
 // Renders bounding boxes around detected enemy players:
 // - Type 0: Corner Brackets (8-segment tactical brackets with shadow backing)
-// - Type 1: Full Chaturbhuj (Rectangular solid border with translucent background)
+// - Type 1: Full Chaturbhuj (Rectangular solid border, fill only when enabled)
 // - Type 2: Dual Alpha Outline Box (Outer blur border + inner primary line)
 // ============================================================================
 
@@ -19,6 +19,7 @@ namespace func::esp {
 
         float thick = cfg::esp::box_thickness;
         float round = cfg::esp::box_rounding;
+        const bool filled = cfg::esp::box_filled; // border-only by default
 
         if (type == 0) {
             // Corner Bracket Box
@@ -44,13 +45,13 @@ namespace func::esp {
             dl->AddRect({tl.x - 1.f, tl.y - 1.f}, {br.x + 1.f, br.y + 1.f},
                         IM_COL32(0, 0, 0, 180), round, 0, thick + 1.5f);
             dl->AddRect(tl, br, col, round, 0, thick);
-            dl->AddRectFilled(tl, br, withAlpha(col, 0.05f), round);
+            if (filled) dl->AddRectFilled(tl, br, withAlpha(col, 0.05f), round);
         } else {
             // Outline Box with Dual Alpha Borders
             dl->AddRect(tl, br, withAlpha(col, 0.18f), round, 0, thick + 5.f);
             dl->AddRect(tl, br, withAlpha(col, 0.45f), round, 0, thick + 2.f);
             dl->AddRect(tl, br, col, round, 0, thick);
-            dl->AddRectFilled(tl, br, withAlpha(col, 0.06f), round);
+            if (filled) dl->AddRectFilled(tl, br, withAlpha(col, 0.06f), round);
         }
     }
 
