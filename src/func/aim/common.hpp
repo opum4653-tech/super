@@ -76,11 +76,11 @@ namespace aimbot {
     // Smooth direction tracking across frame updates
     inline Vector3 s_smoothDir = Vector3::Zero();
 
-    // High-Speed Weapon RayDir Trajectory State (from pewpew & maxff.h)
-    inline std::mutex        g_silent_lock;
-    inline uint64_t          g_hitObj = 0;
-    inline Vector3           g_targetDir = Vector3::Zero();
-    inline std::atomic<bool> g_hasData{false};
+    // True Aimbot View Rotation State (AimRotation 0x61C from STORM_MODS & maxff.h)
+    inline std::mutex        g_aimbot_lock;
+    inline uint64_t          g_aimbot_player = 0;
+    inline Quaternion        g_aimbot_rotation = Quaternion::Identity();
+    inline std::atomic<bool> g_hasAimbotData{false};
 
 } // namespace aimbot
 

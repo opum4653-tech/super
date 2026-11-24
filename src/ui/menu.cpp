@@ -820,7 +820,7 @@ namespace ui::menu {
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX (100%% Head Lock)");
-                    ImGui::TextDisabled("Direct weapon RayDir trajectory lock to head bone (maxff.h).");
+                    ImGui::TextDisabled("Direct AimRotation view angle lock to head bone (0x61C in maxff.h).");
                 }
                 // ============================================================
                 // TAB 3: MOTION (ANTI-BAN PROTECTED)
