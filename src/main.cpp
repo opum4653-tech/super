@@ -198,9 +198,10 @@ static int start_overlay() {
                 kpm.initialize(proc::pid);
                 proc::lib = get_lib();
                 if (proc::lib > 0) {
-                    // Verify valid ELF magic header in target process (0x7F 'E' 'L' 'F')
+                    // Start scraper when ELF magic is valid OR GameFacade cell is readable
                     uint32_t elfMagic = rpm<uint32_t>(proc::lib);
-                    if (elfMagic == 0x464C457F) {
+                    uint64_t gfCell = rpm<uint64_t>(proc::lib + Offsets::Base::GameFacade);
+                    if (elfMagic == 0x464C457F || gfCell > 0x10000) {
                         data::thread_start();
                         aimbot::thread_start();
 
