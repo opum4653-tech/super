@@ -9,6 +9,7 @@
 #include "common.hpp"
 #include "target.hpp"
 #include "fov.hpp"
+#include "Android_touch/TouchHelperA.h"
 #include <thread>
 #include <atomic>
 #include <mutex>
@@ -21,6 +22,15 @@ namespace aimbot {
 
     inline std::atomic<bool> g_aim_running{false};
     inline std::thread       g_aim_thread;
+    constexpr int            kAimTouchSlot = 7;
+    inline float             s_fingerX = 0.0f;
+    inline float             s_fingerY = 0.0f;
+
+    inline void release_aim_finger() {
+        if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
+        s_fingerX = 0.0f;
+        s_fingerY = 0.0f;
+    }
 
     inline Quaternion quat_mul(const Quaternion& a, const Quaternion& b) {
         return Quaternion(
@@ -35,18 +45,58 @@ namespace aimbot {
         return Quaternion(-q.x, -q.y, -q.z, q.w);
     }
 
-    // Lock-free head guidance via Player_Rotation (0x61C).
-    // Uses crosshair-relative delta (camForward -> dirToHead) so any scope/shoulder
-    // pitch offset or recoil is automatically canceled without locking the camera.
+    // Lock-free head guidance: pairs real uinput touch drag with rate-limited
+    // Player_Rotation (0x61C) Slerp so rotation never moves without touch input.
     inline void write_head_aim(uint64_t localPlayer,
                                const cfg::RuntimeConfig& rc,
                                const TargetAcquisitionResult& acq,
                                bool triggerActive) {
         if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f) {
+            release_aim_finger();
             return;
         }
-        if (!is_valid_ptr(localPlayer)) return;
+        if (!is_valid_ptr(localPlayer)) {
+            release_aim_finger();
+            return;
+        }
 
+        // 1. Emit real touch drag in the right-side camera look zone
+        const float cx = rc.screenW * 0.5f;
+        const float cy = rc.screenH * 0.5f;
+        const float dx = acq.bestScreenPos.x - cx;
+        const float dy = acq.bestScreenPos.y - cy;
+        const float err = sqrtf(dx * dx + dy * dy);
+        if (std::isfinite(err) && err >= 1.0f) {
+            const float anchorX = rc.screenW * 0.72f;
+            const float anchorY = rc.screenH * 0.45f;
+            const float minX = rc.screenW * 0.55f, maxX = rc.screenW * 0.92f;
+            const float minY = rc.screenH * 0.12f, maxY = rc.screenH * 0.88f;
+
+            if (!IsFingerDown(kAimTouchSlot) || s_fingerX <= 0.0f) {
+                s_fingerX = anchorX;
+                s_fingerY = anchorY;
+                Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
+            }
+            float dragStep = (rc.aimPullStepPx > 0.0f) ? rc.aimPullStepPx : 12.0f;
+            if (dragStep > err) dragStep = err;
+            float nx = s_fingerX + (dx / err) * dragStep;
+            float ny = s_fingerY + (dy / err) * dragStep;
+            if (nx < minX || nx > maxX || ny < minY || ny > maxY) {
+                Touch_Up_Slot(kAimTouchSlot);
+                s_fingerX = anchorX;
+                s_fingerY = anchorY;
+                Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
+                nx = s_fingerX + (dx / err) * dragStep;
+                ny = s_fingerY + (dy / err) * dragStep;
+            }
+            s_fingerX = nx;
+            s_fingerY = ny;
+            Touch_Move_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
+        } else {
+            release_aim_finger();
+        }
+
+        // 2. Gentle, rate-limited Player_Rotation (0x61C) head alignment
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
         Vector3 camFwd = GetCameraForward(vm);
@@ -56,8 +106,7 @@ namespace aimbot {
             return;
         }
 
-        // Bone::Head (0x6A8) sits near the crown of the head; nudge -0.05m to center on face.
-        const Vector3 headPos = acq.target.getHeadAimPoint(rc.aimHeadBias - 0.05f);
+        const Vector3 headPos = acq.target.getHeadAimPoint(rc.aimHeadBias);
         Vector3 dir = headPos - camPos;
         if (dir.sqrMagnitude() < 1e-4f || !std::isfinite(dir.x) ||
             !std::isfinite(dir.y) || !std::isfinite(dir.z)) {
@@ -77,27 +126,26 @@ namespace aimbot {
 
         const Quaternion targetRot = Quaternion::Normalize(quat_mul(qDelta, currentRot));
 
-        // Deadzone: skip write when already within ~0.4 deg of head (avoids micro-jitter writes)
+        // Deadzone (~0.25 deg) to prevent micro-jitter writes
         float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +
                           currentRot.z * targetRot.z + currentRot.w * targetRot.w);
         if (dot > 1.0f) dot = 1.0f;
-        if (dot > 0.999975f) return;
+        if (dot > 0.999990f) return;
 
-        // 2026 Behavioral Stealth: cap angular velocity per write (~8 deg max)
-        // and enforce >= 8ms write spacing so rotation never produces unnatural spikes.
+        // Safe 16ms (~60Hz) cadence and 4.5 deg max step per write
         static auto s_lastWrite = std::chrono::steady_clock::time_point{};
         const auto now = std::chrono::steady_clock::now();
         if (s_lastWrite.time_since_epoch().count() != 0 &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 8) {
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 16) {
             return;
         }
 
         const float totalAngleRad = 2.0f * acosf(dot);
-        float t = (rc.aimPullStepPx / 40.0f) * 0.45f;
+        float t = (rc.aimPullStepPx / 40.0f) * 0.35f;
         if (!std::isfinite(t) || t < 0.04f) t = 0.04f;
-        if (t > 0.45f) t = 0.45f;
+        if (t > 0.35f) t = 0.35f;
 
-        constexpr float kMaxStepRad = 8.0f * (3.14159265f / 180.0f);
+        constexpr float kMaxStepRad = 4.5f * (3.14159265f / 180.0f);
         if (totalAngleRad > 1e-4f && (totalAngleRad * t) > kMaxStepRad) {
             t = kMaxStepRad / totalAngleRad;
         }
@@ -137,6 +185,7 @@ namespace aimbot {
                 ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
 
             if (!active || !is_valid_ptr(localPlayer)) {
+                release_aim_finger();
                 clear_target_snapshot();
                 waitLock.lock();
                 continue;
@@ -160,6 +209,7 @@ namespace aimbot {
         }
 
         waitLock.unlock();
+        release_aim_finger();
         clear_target_snapshot();
     }
 
@@ -172,6 +222,7 @@ namespace aimbot {
         if (!g_aim_running.exchange(false)) return;
         cfg::notify_state_change();
         if (g_aim_thread.joinable()) g_aim_thread.join();
+        release_aim_finger();
         clear_target_snapshot();
     }
 

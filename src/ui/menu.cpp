@@ -841,7 +841,7 @@ namespace ui::menu {
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##HeadBias", &cfg::aim::head_bias, -0.5f, 0.5f, "%.2f m");
+                    ImGui::SliderFloat("##HeadBias", &cfg::aim::head_bias, -0.25f, 0.25f, "%.2f m");
                     ImGui::TextDisabled("Head Aim Offset (menu-controlled)");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));

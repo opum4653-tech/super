@@ -574,7 +574,6 @@ bool Touch_Init(int w, int h, uint32_t orientation_, bool readOnly) {
     ::screenHeight = (float)h; 
     ::orientation = orientation_;
 
-    system("chmod 000 -R /proc/bus/input/* 2>/dev/null");
     return true;
 }
 
