@@ -43,4 +43,10 @@ namespace data {
     extern std::atomic<int>        selectedEnemyCount;
     extern std::atomic<int>        selectedDictCount;
 
+    // Chain-step diagnostics to pinpoint which offset hop failed when match=0x0
+    extern std::atomic<uint64_t>   diagDirectCell;
+    extern std::atomic<uint64_t>   diagStaticFields;
+    extern std::atomic<uint64_t>   diagBaseGame;
+    extern std::atomic<uint64_t>   diagRawMatch;
+
 } // namespace data

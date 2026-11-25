@@ -52,6 +52,11 @@ namespace data {
     std::atomic<int>         selectedEnemyCount{0};
     std::atomic<int>         selectedDictCount{0};
 
+    std::atomic<uint64_t>    diagDirectCell{0};
+    std::atomic<uint64_t>    diagStaticFields{0};
+    std::atomic<uint64_t>    diagBaseGame{0};
+    std::atomic<uint64_t>    diagRawMatch{0};
+
     matrix get_view_matrix() {
         std::lock_guard<std::mutex> lk(g_viewMutex);
         return viewMatrix;
@@ -62,6 +67,10 @@ namespace data {
         selectedDictAddr.store(0);
         selectedEnemyCount.store(0);
         selectedDictCount.store(0);
+        diagDirectCell.store(0);
+        diagStaticFields.store(0);
+        diagBaseGame.store(0);
+        diagRawMatch.store(0);
     }
 
     // State-transition signal only: not an entity cache or fallback value.
@@ -327,12 +336,15 @@ namespace data {
             uint64_t base = 0;
             uint64_t match = 0;
             uint64_t local = 0;
-            int score = 0;
+            int score = -1;
         };
         ChainCandidate best;
 
+        uint64_t lastCell = 0, lastSf = 0, lastBg = 0, lastRawMatch = 0;
+
         auto score_chain = [&](uint64_t bg, uint64_t match) {
             if (!bg || bg < 0x10000 || !match || match < 0x10000) return;
+            lastRawMatch = match;
             uint64_t lp = rpm<uint64_t>(match + Offsets::Match_LocalPlayer);
             int score = is_valid_ptr(lp) ? 1000 : 0;
 
@@ -358,13 +370,14 @@ namespace data {
         };
 
         const uintptr_t gfOffsets[] = {
-            oxorany(Offsets::GameFacade),
-            oxorany(Offsets::Base::GameFacade_Alt)
+            Offsets::Base::GameFacade,
+            Offsets::Base::GameFacade_Alt
         };
 
         for (uintptr_t gfOff : gfOffsets) {
             uint64_t directCell = rpm<uint64_t>(proc::lib + gfOff);
             if (!directCell || directCell < 0x10000) continue;
+            if (!lastCell) lastCell = directCell;
 
             uint64_t classCandidates[] = { directCell, rpm<uint64_t>(directCell) };
 
@@ -373,6 +386,7 @@ namespace data {
 
                 uint64_t staticFields = rpm<uint64_t>(gfClass + Offsets::GameFacade_P2);
                 if (!staticFields || staticFields < 0x10000) continue;
+                if (!lastSf) lastSf = staticFields;
 
                 uint64_t bgCandidates[] = {
                     rpm<uint64_t>(staticFields),        // +0x0 (STORM_MODS pattern)
@@ -380,10 +394,16 @@ namespace data {
                 };
 
                 for (uint64_t bg : bgCandidates) {
+                    if (bg >= 0x10000 && !lastBg) lastBg = bg;
                     score_chain(bg, rpm<uint64_t>(bg + Offsets::BaseGame_Match));
                 }
             }
         }
+
+        diagDirectCell.store(lastCell);
+        diagStaticFields.store(lastSf);
+        diagBaseGame.store(lastBg);
+        diagRawMatch.store(lastRawMatch);
 
         uint64_t BaseGame = best.base;
         uint64_t m_Match  = best.match;

@@ -810,6 +810,11 @@ namespace ui::menu {
                                 (unsigned long long)data::selectedDictAddr.load(),
                                 data::selectedDictCount.load(),
                                 data::selectedEnemyCount.load());
+                    ImGui::Text("Chain: cell=0x%llx sf=0x%llx bg=0x%llx rawM=0x%llx",
+                                (unsigned long long)data::diagDirectCell.load(),
+                                (unsigned long long)data::diagStaticFields.load(),
+                                (unsigned long long)data::diagBaseGame.load(),
+                                (unsigned long long)data::diagRawMatch.load());
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     if (TouchButton("Test / Re-detect KPM Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
