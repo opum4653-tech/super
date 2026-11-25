@@ -684,19 +684,18 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Memory Engine Telemetry", ui_scale);
 
                     const bool kpmConnected = kpm.diag.is_connected.load();
-                    const int  syscallRet   = kpm.diag.syscall_ret.load();
-                    const bool syscallWorks = kpm.diag.syscall_works.load();
 
                     if (kpmConnected) {
                         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Driver State: CONNECTED");
                     } else {
                         ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Driver State: DISCONNECTED");
+                        ImGui::TextDisabled("Probe: neo(ret=%d, res=%d, err=%d)",
+                                            kpm.diag.neo_ret.load(),
+                                            kpm.diag.neo_result.load(),
+                                            kpm.diag.neo_errno.load());
                     }
 
                     ImGui::Text("Active Engine: %s", kpm.get_active_engine_name());
-
-                    ImGui::Text("Syscall 270: ret=%d [%s]",
-                                syscallRet, syscallWorks ? "OK" : "Idle");
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Target Process & Memory", ui_scale);

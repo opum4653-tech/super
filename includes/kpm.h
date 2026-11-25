@@ -1,9 +1,8 @@
 #pragma once
 // ============================================================================
-// KPM (KERNEL PATCH MODULE) ENGINE & LIVE TELEMETRY (KPM-ONLY)
+// NINMODS KPM ENGINE & LIVE TELEMETRY (0x4E41)
 // ============================================================================
-// Supports TB KPM (0x63687501) and Neo KPM (0x4E41) via prctl.
-// Direct Syscall 270 (process_vm_readv / process_vm_writev) is disabled.
+// Works exclusively with NinMods.kpm (NA_PRCTL_MAGIC = 0x4E41).
 // ============================================================================
 
 #include <atomic>
@@ -17,7 +16,6 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
-// #include <sys/uio.h> // Syscall 270 disabled
 
 #ifndef __NR_prctl
 #if defined(__aarch64__)
@@ -31,18 +29,7 @@
 #endif
 #endif
 
-// ==================== TB KPM DEFINITIONS ====================
-#define PRCTL_MEM_READ  0x63687501
-#define PRCTL_MEM_WRITE 0x63687502
-
-struct mem_operation {
-    pid_t    target_pid;
-    uint64_t addr;
-    void    *buffer;
-    uint64_t size;
-};
-
-// ==================== NEO KPM DEFINITIONS ====================
+// ==================== NINMODS KPM DEFINITIONS ====================
 #define NA_PRCTL_MAGIC      0x4E41
 #define NA_CMD_READ_MEM     1
 #define NA_CMD_WRITE_MEM    2
@@ -62,42 +49,20 @@ struct na_cmd {
     uint8_t  data[NA_MAX_RW_SIZE];
 };
 
-enum EKpmEngine {
-    KPM_ENGINE_AUTO = 0,
-    KPM_ENGINE_TB,      // TB KPM (0x63687501)
-    KPM_ENGINE_NEO,     // Neo KPM (0x4E41)
-    KPM_ENGINE_SYSCALL  // Disabled
-};
-
 struct KpmDiagnostics {
-    std::atomic<int>  selected_engine{KPM_ENGINE_AUTO};
-    std::atomic<int>  active_engine{KPM_ENGINE_AUTO};
     std::atomic<bool> is_connected{false};
 
-    // TB KPM Probe
-    std::atomic<int>  tb_ret{-999};
-    std::atomic<int>  tb_errno{0};
-    std::atomic<bool> tb_works{false};
-
-    // Neo KPM Probe
+    // NinMods KPM Probe
     std::atomic<int>  neo_ret{-999};
     std::atomic<int>  neo_errno{0};
     std::atomic<int>  neo_result{-999};
     std::atomic<bool> neo_works{false};
-
-    // Syscall 270 (Disabled)
-    std::atomic<int>  syscall_ret{-1};
-    std::atomic<bool> syscall_works{false};
 
     // Counters
     std::atomic<uint64_t> total_reads{0};
     std::atomic<uint64_t> failed_reads{0};
     std::atomic<uint64_t> total_writes{0};
     std::atomic<uint64_t> failed_writes{0};
-    std::atomic<uint64_t> verified_writes{0};
-    std::atomic<uint64_t> failed_verified_writes{0};
-    std::atomic<uint64_t> rollback_ok{0};
-    std::atomic<uint64_t> rollback_failed{0};
     std::atomic<uint32_t> last_magic{0};
     char status_str[128] = "Initializing...";
 };
@@ -110,29 +75,6 @@ public:
     KpmDiagnostics diag;
 
     c_kpm() : pid(-1) {}
-
-    bool tb_kpm_read(pid_t target_pid, uintptr_t addr, void *buffer, size_t size) {
-        if (target_pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
-        struct mem_operation op = { target_pid, (uint64_t)addr, buffer, (uint64_t)size };
-        errno = 0;
-        long r = syscall(__NR_prctl, PRCTL_MEM_READ, (unsigned long)&op, 0, 0, 0);
-        diag.tb_ret = (int)r;
-        diag.tb_errno = errno;
-        if (r >= 0) return true;
-        errno = 0;
-        r = prctl(PRCTL_MEM_READ, (unsigned long)&op, 0, 0, 0);
-        diag.tb_ret = (int)r;
-        diag.tb_errno = errno;
-        return (r >= 0);
-    }
-
-    bool tb_kpm_write(pid_t target_pid, uintptr_t addr, const void *buffer, size_t size) {
-        if (target_pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
-        struct mem_operation op = { target_pid, (uint64_t)addr, const_cast<void*>(buffer), (uint64_t)size };
-        long r = syscall(__NR_prctl, PRCTL_MEM_WRITE, (unsigned long)&op, 0, 0, 0);
-        if (r >= 0) return true;
-        return (prctl(PRCTL_MEM_WRITE, (unsigned long)&op, 0, 0, 0) >= 0);
-    }
 
     bool neo_kpm_read(pid_t target_pid, uintptr_t addr, void *buffer, size_t size) {
         if (target_pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
@@ -150,25 +92,6 @@ public:
 
             errno = 0;
             long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_READ_MEM, (unsigned long)&cmd, 0, 0);
-            diag.neo_ret = (int)r;
-            diag.neo_errno = errno;
-            diag.neo_result = cmd.result;
-            if (r == 0 && cmd.result == 0) {
-                memcpy(ptr, cmd.data, chunk);
-                ptr += chunk;
-                curr_addr += chunk;
-                remaining -= chunk;
-                diag.neo_works = true;
-                continue;
-            }
-
-            memset(&cmd, 0, sizeof(cmd));
-            cmd.op   = NA_CMD_READ_MEM;
-            cmd.pid  = (uint32_t)target_pid;
-            cmd.addr = (uint64_t)curr_addr;
-            cmd.size = (uint32_t)chunk;
-            errno = 0;
-            r = syscall(__NR_prctl, NA_PRCTL_MAGIC, (unsigned long)&cmd, 0, 0, 0);
             diag.neo_ret = (int)r;
             diag.neo_errno = errno;
             diag.neo_result = cmd.result;
@@ -207,28 +130,10 @@ public:
                 remaining -= chunk;
                 continue;
             }
-
-            memset(&cmd, 0, sizeof(cmd));
-            cmd.op   = NA_CMD_WRITE_MEM;
-            cmd.pid  = (uint32_t)target_pid;
-            cmd.addr = (uint64_t)curr_addr;
-            cmd.size = (uint32_t)chunk;
-            memcpy(cmd.data, ptr, chunk);
-            r = syscall(__NR_prctl, NA_PRCTL_MAGIC, (unsigned long)&cmd, 0, 0, 0);
-            if (r == 0 && cmd.result == 0) {
-                ptr += chunk;
-                curr_addr += chunk;
-                remaining -= chunk;
-                continue;
-            }
             return false;
         }
         return true;
     }
-
-    // Syscall 270 (External work) disabled — KPM only
-    // bool syscall_read(pid_t target_pid, uintptr_t addr, void *buffer, size_t size) { ... }
-    // bool syscall_write(pid_t target_pid, uintptr_t addr, const void *buffer, size_t size) { ... }
 
     void test_connection(pid_t target_pid = -1) {
         if (target_pid <= 0) target_pid = this->pid;
@@ -237,58 +142,31 @@ public:
             initialize(target_pid);
         }
 
-        // 1. Test TB KPM
+        // Test NinMods.kpm via CMD_READ_MEM self-canary
         volatile uint32_t test_val = 0x5A5A1234;
-        uint32_t read_buf = 0;
-        struct mem_operation op = { getpid(), reinterpret_cast<uint64_t>(&test_val), &read_buf, sizeof(test_val) };
-        errno = 0;
-        long r = syscall(__NR_prctl, PRCTL_MEM_READ, (unsigned long)&op, 0, 0, 0);
-        diag.tb_ret = (int)r;
-        diag.tb_errno = errno;
-        diag.tb_works = (r >= 0 && read_buf == test_val);
-
-        if (!diag.tb_works && target_pid > 0 && target_pid != getpid()) {
-            uintptr_t base = parse_maps_module_base("libil2cpp.so");
-            if (base != 0) {
-                uint32_t magic = 0;
-                struct mem_operation op2 = { target_pid, (uint64_t)base, &magic, sizeof(magic) };
-                errno = 0;
-                long r2 = syscall(__NR_prctl, PRCTL_MEM_READ, (unsigned long)&op2, 0, 0, 0);
-                diag.tb_ret = (int)r2;
-                diag.tb_errno = errno;
-                diag.tb_works = (r2 >= 0 && magic == 0x464C457F);
-                if (diag.tb_works) diag.last_magic = magic;
-            }
-        }
-
-        // 2. Test Neo KPM
+        uint32_t neo_canary = 0;
         na_cmd cmd;
         memset(&cmd, 0, sizeof(cmd));
-        cmd.op = NA_CMD_GET_PID;
-        strncpy(cmd.pkg, "com.dts.freefiremax", sizeof(cmd.pkg) - 1);
+        cmd.op   = NA_CMD_READ_MEM;
+        cmd.pid  = (uint32_t)getpid();
+        cmd.addr = reinterpret_cast<uint64_t>(&test_val);
+        cmd.size = sizeof(test_val);
         errno = 0;
-        r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_GET_PID, (unsigned long)&cmd, 0, 0);
+        long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_READ_MEM, (unsigned long)&cmd, 0, 0);
+        if (r == 0 && cmd.result == 0) {
+            memcpy(&neo_canary, cmd.data, sizeof(neo_canary));
+        }
         diag.neo_ret = (int)r;
         diag.neo_errno = errno;
         diag.neo_result = cmd.result;
-        diag.neo_works = (r == 0 && cmd.result == 0 && cmd.pid > 0);
+        diag.neo_works = (r == 0 && cmd.result == 0 && neo_canary == test_val);
 
-        // Syscall 270 disabled
-        diag.syscall_ret = -1;
-        diag.syscall_works = false;
-
-        if (diag.tb_works) {
-            snprintf(diag.status_str, sizeof(diag.status_str), "TB KPM Active");
+        if (diag.neo_works) {
+            snprintf(diag.status_str, sizeof(diag.status_str), "NinMods KPM Active");
             diag.is_connected = true;
-            diag.active_engine = KPM_ENGINE_TB;
-        } else if (diag.neo_works) {
-            snprintf(diag.status_str, sizeof(diag.status_str), "Neo KPM Active");
-            diag.is_connected = true;
-            diag.active_engine = KPM_ENGINE_NEO;
         } else {
-            snprintf(diag.status_str, sizeof(diag.status_str), "KPM Not Connected");
+            snprintf(diag.status_str, sizeof(diag.status_str), "NinMods KPM Disconnected");
             diag.is_connected = false;
-            diag.active_engine = KPM_ENGINE_AUTO;
         }
     }
 
@@ -304,12 +182,9 @@ public:
     void initialize(pid_t target_pid) {
         if (this->pid == target_pid) return;
         this->pid = target_pid;
-        diag.active_engine = KPM_ENGINE_AUTO;
-        diag.is_connected  = false;
-        diag.tb_works      = false;
-        diag.neo_works     = false;
-        diag.syscall_works = false;
-        diag.last_magic    = 0;
+        diag.is_connected = false;
+        diag.neo_works    = false;
+        diag.last_magic   = 0;
     }
 
     void set_pid(pid_t target_pid) {
@@ -325,31 +200,16 @@ public:
     }
 
     const char* get_active_engine_name() const {
-        switch (diag.active_engine.load()) {
-            case KPM_ENGINE_TB:  return "TB KPM (0x63687501)";
-            case KPM_ENGINE_NEO: return "Neo KPM (0x4E41)";
-            default:             return "None / Disconnected";
-        }
+        return diag.is_connected.load() ? "NinMods KPM (0x4E41)" : "None / Disconnected";
     }
 
     bool read(uintptr_t addr, void *buffer, size_t size) {
         if (this->pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
         diag.total_reads++;
-
-        if (tb_kpm_read(this->pid, addr, buffer, size)) {
-            diag.active_engine = KPM_ENGINE_TB;
-            diag.is_connected = true;
-            return true;
-        }
         if (neo_kpm_read(this->pid, addr, buffer, size)) {
-            diag.active_engine = KPM_ENGINE_NEO;
             diag.is_connected = true;
             return true;
         }
-
-        // Syscall 270 disabled (KPM only)
-        // if (syscall_read(this->pid, addr, buffer, size)) return true;
-
         diag.failed_reads++;
         return false;
     }
@@ -357,21 +217,10 @@ public:
     bool write(uintptr_t addr, const void *buffer, size_t size) {
         if (this->pid <= 0 || addr == 0 || buffer == nullptr || size == 0) return false;
         diag.total_writes++;
-
-        if (tb_kpm_write(this->pid, addr, buffer, size)) {
-            diag.active_engine = KPM_ENGINE_TB;
-            diag.is_connected = true;
-            return true;
-        }
         if (neo_kpm_write(this->pid, addr, buffer, size)) {
-            diag.active_engine = KPM_ENGINE_NEO;
             diag.is_connected = true;
             return true;
         }
-
-        // Syscall 270 disabled (KPM only)
-        // if (syscall_write(this->pid, addr, buffer, size)) return true;
-
         diag.failed_writes++;
         return false;
     }
@@ -395,12 +244,6 @@ public:
         cmd.op = NA_CMD_GET_PID;
         strncpy(cmd.pkg, pkg_name, sizeof(cmd.pkg) - 1);
         if (syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_GET_PID, (unsigned long)&cmd, 0, 0) == 0 && cmd.result == 0 && cmd.pid > 0) {
-            return static_cast<pid_t>(cmd.pid);
-        }
-        memset(&cmd, 0, sizeof(cmd));
-        cmd.op = NA_CMD_GET_PID;
-        strncpy(cmd.pkg, pkg_name, sizeof(cmd.pkg) - 1);
-        if (syscall(__NR_prctl, NA_PRCTL_MAGIC, (unsigned long)&cmd, 0, 0, 0) == 0 && cmd.result == 0 && cmd.pid > 0) {
             return static_cast<pid_t>(cmd.pid);
         }
         return -1;
