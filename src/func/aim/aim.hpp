@@ -45,8 +45,9 @@ namespace aimbot {
         return Quaternion(-q.x, -q.y, -q.z, q.w);
     }
 
-    // Lock-free head guidance: pairs real uinput touch drag with rate-limited
-    // Player_Rotation (0x61C) Slerp so rotation never moves without touch input.
+    // Lock-free head guidance:
+    // - Zero-Write Touch Mode (default, anti-blacklist): pure uinput touch drag, 0 memory writes.
+    // - Rotation Assist Mode (when Zero-Write is OFF): rate-limited 60Hz / 4.5 deg Player_Rotation Slerp.
     inline void write_head_aim(uint64_t localPlayer,
                                const cfg::RuntimeConfig& rc,
                                const TargetAcquisitionResult& acq,
@@ -60,13 +61,17 @@ namespace aimbot {
             return;
         }
 
-        // 1. Emit real touch drag in the right-side camera look zone
-        const float cx = rc.screenW * 0.5f;
-        const float cy = rc.screenH * 0.5f;
-        const float dx = acq.bestScreenPos.x - cx;
-        const float dy = acq.bestScreenPos.y - cy;
-        const float err = sqrtf(dx * dx + dy * dy);
-        if (std::isfinite(err) && err >= 1.0f) {
+        if (rc.aimZeroWrite) {
+            const float cx = rc.screenW * 0.5f;
+            const float cy = rc.screenH * 0.5f;
+            const float dx = acq.bestScreenPos.x - cx;
+            const float dy = acq.bestScreenPos.y - cy;
+            const float err = sqrtf(dx * dx + dy * dy);
+            if (!std::isfinite(err) || err < 1.5f) {
+                release_aim_finger();
+                return;
+            }
+
             const float anchorX = rc.screenW * 0.72f;
             const float anchorY = rc.screenH * 0.45f;
             const float minX = rc.screenW * 0.55f, maxX = rc.screenW * 0.92f;
@@ -92,11 +97,12 @@ namespace aimbot {
             s_fingerX = nx;
             s_fingerY = ny;
             Touch_Move_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
-        } else {
-            release_aim_finger();
+            return;
         }
 
-        // 2. Gentle, rate-limited Player_Rotation (0x61C) head alignment
+        release_aim_finger();
+
+        // 2. Gentle, rate-limited Player_Rotation (0x61C) head alignment (only when Zero-Write is OFF)
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
         Vector3 camFwd = GetCameraForward(vm);

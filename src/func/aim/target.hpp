@@ -72,6 +72,7 @@ namespace aimbot {
             // a match uses a different PRIDataPool layout.
             if (enemy.Head.z < 0.001f) continue;
             if (enemy.hpValid && enemy.curHP <= 0) continue;
+            if (enemy.isKnocked) continue; // Skip knocked players to prevent unnecessary headshot flags
             if (rc.aimIgnoreBots && enemy.isBot) continue;
             // No code-side distance limit. The game's official weapon range
             // decides whether a target is valid; we never filter by distance.

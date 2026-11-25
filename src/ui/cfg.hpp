@@ -64,6 +64,7 @@ namespace esp {
 
 namespace aim {
     inline bool  enable           = false; // Aimbot Headshot (Free Fire MAX)
+    inline bool  zero_write       = true;  // Default ON: Touch-only (Zero memory write, Anti-Blacklist)
     inline bool  show_fov         = false; // Render FOV Circle
     inline float aim_fov          = 45.0f;  // AimFov: head-carry circle (0 = use pixel radius)
     inline float fov_radius       = 200.0f; // Fallback pixel radius when AimFov is 0
@@ -105,6 +106,7 @@ inline bool any_feature_enabled() {
 struct RuntimeConfig {
     bool  master            = false;
     bool  aimEnable         = false;
+    bool  aimZeroWrite      = true;
     float aimPullStepPx     = 0.0f;
     bool  aimShowFov        = false;
     bool  aimIgnoreBots     = false;
@@ -132,6 +134,7 @@ struct RuntimeConfig {
     bool equals(const RuntimeConfig& o) const {
         return master == o.master &&
                aimEnable == o.aimEnable &&
+               aimZeroWrite == o.aimZeroWrite &&
                aimPullStepPx == o.aimPullStepPx &&
                aimShowFov == o.aimShowFov &&
                aimIgnoreBots == o.aimIgnoreBots &&
@@ -175,6 +178,7 @@ inline void publish_runtime() {
     RuntimeConfig s;
     s.master          = master_enabled;
     s.aimEnable       = aim::enable;
+    s.aimZeroWrite    = aim::zero_write;
     s.aimPullStepPx   = aim::pull_step_px;
     s.aimShowFov      = aim::show_fov;
     s.aimIgnoreBots   = aim::ignore_bots;

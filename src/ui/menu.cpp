@@ -822,6 +822,7 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
                     DrawToggleSwitch("Aimbot Headshot (Max FF)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Zero-Write Touch (Anti-Blacklist)", &cfg::aim::zero_write, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 

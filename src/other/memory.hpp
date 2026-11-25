@@ -204,6 +204,14 @@ inline int get_pid() {
     }
     proc::pid_cache = 0;
 
+    // Direct Neo KPM PID query if available
+    pid_t neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefiremax"));
+    if (neo_pid > 0) {
+        proc::pid_cache = neo_pid;
+        kpm.initialize(neo_pid);
+        return neo_pid;
+    }
+
     int pfd = sys::openat(AT_FDCWD, oxorany("/proc"), O_RDONLY | O_DIRECTORY);
     if (pfd < 0) return -1;
 
