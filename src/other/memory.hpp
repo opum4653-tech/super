@@ -108,8 +108,30 @@ inline bool is_valid_ptr(uint64_t a) {
 inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
 
 // ============================================================================
-// PROCESS MEMORY READ
+// PROCESS MEMORY READ & GUARDED WRITE
 // ============================================================================
+
+namespace mem_guard {
+    inline thread_local uint64_t allowed_addr = 0;
+    inline thread_local size_t   allowed_size = 0;
+
+    inline bool allows(uint64_t a, size_t l) {
+        return allowed_addr == a && allowed_size == l;
+    }
+
+    struct Scope {
+        Scope(uint64_t a, size_t l) {
+            allowed_addr = a;
+            allowed_size = l;
+        }
+        ~Scope() {
+            allowed_addr = 0;
+            allowed_size = 0;
+        }
+        Scope(const Scope&) = delete;
+        Scope& operator=(const Scope&) = delete;
+    };
+}
 
 inline bool mem_read(uint64_t a, void* b, size_t l) {
     if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
@@ -117,6 +139,13 @@ inline bool mem_read(uint64_t a, void* b, size_t l) {
     memset(b, 0, l);
     kpm.initialize(proc::pid);
     return kpm.read(static_cast<uintptr_t>(a), b, l);
+}
+
+inline bool mem_write(uint64_t a, const void* b, size_t l) {
+    if (!mem_guard::allows(a, l)) return false;
+    if (proc::pid <= 0 || !is_valid_ptr(a) || l == 0 || b == nullptr) return false;
+    kpm.initialize(proc::pid);
+    return kpm.write(static_cast<uintptr_t>(a), b, l);
 }
 
 template<typename T> inline T rpm(uint64_t a) {

@@ -683,8 +683,14 @@ bool IsFingerDown(int slot) {
 
 bool GetFingerScreenPos(int slot, float& outX, float& outY) {
     if (slot < 0 || slot >= maxF || !Finger[0][slot].isDown) return false;
-    outX = (float)Finger[0][slot].x * (screenWidth / (s_digitizerMaxX > 0.0f ? s_digitizerMaxX : 1.0f));
-    outY = (float)Finger[0][slot].y * (screenHeight / (s_digitizerMaxY > 0.0f ? s_digitizerMaxY : 1.0f));
+    float x = (float)Finger[0][slot].x * (screenWidth / (s_digitizerMaxX > 0.0f ? s_digitizerMaxX : 1.0f));
+    float y = (float)Finger[0][slot].y * (screenHeight / (s_digitizerMaxY > 0.0f ? s_digitizerMaxY : 1.0f));
+    switch (orientation) {
+        case 1: outX = y; outY = screenHeight - x; break;
+        case 2: outX = screenWidth - x; outY = screenHeight - y; break;
+        case 3: outX = screenWidth - y; outY = x; break;
+        default: outX = x; outY = y; break;
+    }
     return true;
 }
 
