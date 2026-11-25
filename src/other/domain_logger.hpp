@@ -1,13 +1,12 @@
 #pragma once
 // ============================================================================
-// TEMPORARY GAME DOMAIN LOGGER -> /sdcard/Download/firewall.txt
+// TEMPORARY DOMAIN LOGGER -> /storage/emulated/0/Download/firewall.txt
 // ============================================================================
-// Captures real outbound TLS SNI (TCP:443) domains owned by the target game UID
-// (checked against /proc/net/tcp & /proc/net/tcp6) and writes unique domains
-// to /sdcard/Download/firewall.txt.
+// Captures all outbound DNS (UDP:53), HTTP Host (TCP:80), and TLS SNI (TCP:443)
+// domains while the game is running, and saves unique domains to:
+//   /storage/emulated/0/Download/firewall.txt
 //
-// Remove this file and its 3 lines in src/main.cpp when done collecting domains.
-// See FIREWALL_LOGGER_GUIDE.md for exact add/remove instructions.
+// See FIREWALL_LOGGER_GUIDE.md for exact remove instructions.
 // ============================================================================
 
 #include <atomic>
@@ -41,62 +40,17 @@ namespace domain_logger {
     inline std::mutex        g_file_mutex;
     inline std::unordered_set<std::string> g_seen;
 
-    inline int get_uid_for_pid(int pid) {
-        if (pid <= 0) return -1;
-        char path[64];
-        snprintf(path, sizeof(path), "/proc/%d/status", pid);
-        FILE* f = fopen(path, "r");
-        if (!f) return -1;
-        char line[256];
-        int uid = -1;
-        while (fgets(line, sizeof(line), f)) {
-            if (strncmp(line, "Uid:", 4) == 0) {
-                int ruid = -1;
-                if (sscanf(line + 4, "%d", &ruid) == 1 && ruid >= 0) {
-                    uid = ruid;
-                }
-                break;
-            }
+    inline FILE* open_log_file(const char* mode) {
+        const char* paths[] = {
+            "/storage/emulated/0/Download/firewall.txt",
+            "/data/media/0/Download/firewall.txt",
+            "/sdcard/Download/firewall.txt"
+        };
+        for (const char* p : paths) {
+            FILE* f = fopen(p, mode);
+            if (f) return f;
         }
-        fclose(f);
-        return uid;
-    }
-
-    inline bool port_belongs_to_uid_file(const char* proc_net_path, uint16_t local_port, int target_uid) {
-        FILE* f = fopen(proc_net_path, "r");
-        if (!f) return false;
-        char line[512];
-        // Skip header line
-        if (!fgets(line, sizeof(line), f)) {
-            fclose(f);
-            return false;
-        }
-        bool matched = false;
-        while (fgets(line, sizeof(line), f)) {
-            unsigned int sl = 0;
-            char laddr[128] = {0}, raddr[128] = {0};
-            unsigned int lport = 0, rport = 0, st = 0;
-            unsigned long txq = 0, rxq = 0, tr = 0, tm = 0, retr = 0;
-            int uid = -1;
-            // Format: sl local_address:port rem_address:port st tx:rx tr:tm retr uid
-            if (sscanf(line, " %u: %64[^:]:%x %64[^:]:%x %x %lx:%lx %lx:%lx %lx %d",
-                       &sl, laddr, &lport, raddr, &rport, &st,
-                       &txq, &rxq, &tr, &tm, &retr, &uid) == 12) {
-                if (uid == target_uid && static_cast<uint16_t>(lport) == local_port) {
-                    matched = true;
-                    break;
-                }
-            }
-        }
-        fclose(f);
-        return matched;
-    }
-
-    inline bool is_game_tcp_socket(uint16_t local_port, int game_uid) {
-        if (game_uid < 0 || local_port == 0) return false;
-        if (port_belongs_to_uid_file("/proc/net/tcp6", local_port, game_uid)) return true;
-        if (port_belongs_to_uid_file("/proc/net/tcp", local_port, game_uid)) return true;
-        return false;
+        return nullptr;
     }
 
     inline bool is_valid_domain(const std::string& d) {
@@ -116,6 +70,7 @@ namespace domain_logger {
     }
 
     inline std::string normalize_domain(const char* raw, size_t len) {
+        while (len > 0 && (raw[len - 1] == '.' || raw[len - 1] == ' ')) --len;
         std::string out;
         out.reserve(len);
         for (size_t i = 0; i < len; ++i) {
@@ -124,33 +79,73 @@ namespace domain_logger {
         return is_valid_domain(out) ? out : std::string();
     }
 
+    // Parses UDP:53 DNS query QNAME
+    inline std::string parse_dns_qname(const uint8_t* data, size_t len) {
+        if (len < 13) return {};
+        // QR bit must be 0 (query), QDCOUNT >= 1
+        if ((data[2] & 0x80) != 0) return {};
+        uint16_t qdcount = (static_cast<uint16_t>(data[4]) << 8) | data[5];
+        if (qdcount == 0) return {};
+
+        size_t pos = 12;
+        std::string name;
+        while (pos < len) {
+            uint8_t lab_len = data[pos++];
+            if (lab_len == 0) break;
+            if ((lab_len & 0xC0) != 0 || pos + lab_len > len) return {};
+            if (!name.empty()) name.push_back('.');
+            name.append(reinterpret_cast<const char*>(data + pos), lab_len);
+            pos += lab_len;
+            if (name.size() > 253) return {};
+        }
+        return normalize_domain(name.c_str(), name.size());
+    }
+
+    // Parses TCP:80 HTTP Host: header
+    inline std::string parse_http_host(const uint8_t* data, size_t len) {
+        if (len < 16) return {};
+        const char* s = reinterpret_cast<const char*>(data);
+        for (size_t i = 0; i + 6 < len; ++i) {
+            if ((i == 0 || s[i - 1] == '\n') &&
+                (s[i] == 'H' || s[i] == 'h') &&
+                (s[i + 1] == 'O' || s[i + 1] == 'o') &&
+                (s[i + 2] == 'S' || s[i + 2] == 's') &&
+                (s[i + 3] == 'T' || s[i + 3] == 't') &&
+                s[i + 4] == ':') {
+                size_t start = i + 5;
+                while (start < len && (s[start] == ' ' || s[start] == '\t')) ++start;
+                size_t end = start;
+                while (end < len && s[end] != '\r' && s[end] != '\n' && s[end] != ':') ++end;
+                if (end > start) {
+                    return normalize_domain(s + start, end - start);
+                }
+                break;
+            }
+        }
+        return {};
+    }
+
     // Parses TLS ClientHello SNI extension (RFC 6066) from TCP payload
     inline std::string parse_tls_sni(const uint8_t* data, size_t len) {
         if (len < 43) return {};
-        // TLS Record: ContentType=0x16 (Handshake), Version=0x03xx
         if (data[0] != 0x16 || data[1] != 0x03) return {};
-        // HandshakeType=0x01 (ClientHello)
         if (data[5] != 0x01) return {};
 
-        size_t pos = 5 + 4 + 2 + 32; // Record(5) + HandshakeHdr(4) + Version(2) + Random(32)
+        size_t pos = 5 + 4 + 2 + 32;
         if (pos >= len) return {};
 
-        // Session ID
         uint8_t sess_len = data[pos];
         pos += 1 + sess_len;
         if (pos + 2 > len) return {};
 
-        // Cipher Suites
         uint16_t cipher_len = (static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1];
         pos += 2 + cipher_len;
         if (pos + 1 > len) return {};
 
-        // Compression Methods
         uint8_t comp_len = data[pos];
         pos += 1 + comp_len;
         if (pos + 2 > len) return {};
 
-        // Extensions total length
         uint16_t ext_total = (static_cast<uint16_t>(data[pos]) << 8) | data[pos + 1];
         pos += 2;
         size_t ext_end = pos + ext_total;
@@ -162,8 +157,8 @@ namespace domain_logger {
             pos += 4;
             if (pos + ext_len > ext_end) break;
 
-            if (ext_type == 0x0000 && ext_len >= 5) { // server_name
-                size_t p = pos + 2; // skip server_name_list_length
+            if (ext_type == 0x0000 && ext_len >= 5) {
+                size_t p = pos + 2;
                 while (p + 3 <= pos + ext_len) {
                     uint8_t name_type = data[p];
                     uint16_t name_len = (static_cast<uint16_t>(data[p + 1]) << 8) | data[p + 2];
@@ -182,10 +177,8 @@ namespace domain_logger {
 
     inline void load_existing_domains() {
         std::lock_guard<std::mutex> lk(g_file_mutex);
-        const char* paths[] = { "/sdcard/Download/firewall.txt", "/storage/emulated/0/Download/firewall.txt" };
-        for (const char* p : paths) {
-            FILE* f = fopen(p, "r");
-            if (!f) continue;
+        FILE* f = open_log_file("r");
+        if (f) {
             char line[300];
             while (fgets(line, sizeof(line), f)) {
                 size_t n = strlen(line);
@@ -197,7 +190,12 @@ namespace domain_logger {
                 }
             }
             fclose(f);
-            break;
+        } else {
+            FILE* wf = open_log_file("a");
+            if (wf) {
+                fprintf(wf, "# firewall.txt domain logger started\n");
+                fclose(wf);
+            }
         }
     }
 
@@ -206,14 +204,10 @@ namespace domain_logger {
         std::lock_guard<std::mutex> lk(g_file_mutex);
         if (!g_seen.insert(domain).second) return;
 
-        const char* paths[] = { "/sdcard/Download/firewall.txt", "/storage/emulated/0/Download/firewall.txt" };
-        for (const char* p : paths) {
-            FILE* f = fopen(p, "a");
-            if (f) {
-                fprintf(f, "%s\n", domain.c_str());
-                fclose(f);
-                return;
-            }
+        FILE* f = open_log_file("a");
+        if (f) {
+            fprintf(f, "%s\n", domain.c_str());
+            fclose(f);
         }
     }
 
@@ -222,26 +216,25 @@ namespace domain_logger {
         load_existing_domains();
 
         int sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-        if (sock < 0) return;
+        if (sock < 0) {
+            std::lock_guard<std::mutex> lk(g_file_mutex);
+            FILE* f = open_log_file("a");
+            if (f) {
+                fprintf(f, "# socket(AF_PACKET) failed\n");
+                fclose(f);
+            }
+            return;
+        }
 
-        struct timeval tv{0, 200000}; // 200ms timeout for clean shutdown
+        struct timeval tv{0, 200000};
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
         std::vector<uint8_t> buf(4096);
-        int cached_pid = -1;
-        int cached_uid = -1;
 
         while (g_running.load(std::memory_order_relaxed)) {
-            int cur_pid = proc::pid;
-            if (cur_pid <= 0) {
-                cached_pid = -1;
-                cached_uid = -1;
+            if (proc::pid <= 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(300));
                 continue;
-            }
-            if (cur_pid != cached_pid) {
-                cached_pid = cur_pid;
-                cached_uid = get_uid_for_pid(cur_pid);
             }
 
             struct sockaddr_ll sll{};
@@ -250,7 +243,6 @@ namespace domain_logger {
                                  reinterpret_cast<struct sockaddr*>(&sll), &sll_len);
             if (n <= 0) continue;
 
-            // Only inspect outgoing packets
             if (sll.sll_pkttype != PACKET_OUTGOING) continue;
 
             size_t ip_off = 0;
@@ -279,28 +271,30 @@ namespace domain_logger {
                 continue;
             }
 
-            if (proto != IPPROTO_TCP) continue;
-            if (ip_len < l4_off + 20) continue;
+            if (proto == IPPROTO_UDP) {
+                if (ip_len <= l4_off + 8) continue;
+                const uint8_t* udp = ip + l4_off;
+                uint16_t dport = (static_cast<uint16_t>(udp[2]) << 8) | udp[3];
+                if (dport == 53) {
+                    record_domain(parse_dns_qname(udp + 8, ip_len - l4_off - 8));
+                }
+            } else if (proto == IPPROTO_TCP) {
+                if (ip_len < l4_off + 20) continue;
+                const uint8_t* tcp = ip + l4_off;
+                size_t tcp_rem = ip_len - l4_off;
+                uint16_t dport = (static_cast<uint16_t>(tcp[2]) << 8) | tcp[3];
+                uint8_t tcp_hdr_len = ((tcp[12] >> 4) & 0x0F) * 4;
+                if (tcp_hdr_len < 20 || tcp_rem <= tcp_hdr_len) continue;
 
-            const uint8_t* tcp = ip + l4_off;
-            size_t tcp_rem = ip_len - l4_off;
-            uint16_t sport = (static_cast<uint16_t>(tcp[0]) << 8) | tcp[1];
-            uint16_t dport = (static_cast<uint16_t>(tcp[2]) << 8) | tcp[3];
-            uint8_t tcp_hdr_len = ((tcp[12] >> 4) & 0x0F) * 4;
-            if (tcp_hdr_len < 20 || tcp_rem <= tcp_hdr_len) continue;
+                const uint8_t* payload = tcp + tcp_hdr_len;
+                size_t payload_len = tcp_rem - tcp_hdr_len;
 
-            if (dport != 443) continue;
-
-            const uint8_t* payload = tcp + tcp_hdr_len;
-            size_t payload_len = tcp_rem - tcp_hdr_len;
-            std::string sni = parse_tls_sni(payload, payload_len);
-            if (sni.empty()) continue;
-
-            if (cached_uid >= 0 && !is_game_tcp_socket(sport, cached_uid)) {
-                continue;
+                if (dport == 443) {
+                    record_domain(parse_tls_sni(payload, payload_len));
+                } else if (dport == 80) {
+                    record_domain(parse_http_host(payload, payload_len));
+                }
             }
-
-            record_domain(sni);
         }
 
         close(sock);
