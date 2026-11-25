@@ -24,6 +24,7 @@
 #include "other/memory.hpp"
 #include "other/display_manager.hpp"
 #include "other/settings_guard.hpp"
+#include "other/domain_logger.hpp"
 #include "game/data.hpp"
 #include "game/Offsets.h"
 #include "func/esp.hpp"
@@ -177,6 +178,7 @@ static int start_overlay() {
 
     // Initialize memory engine
     kpm.init(true);
+    domain_logger::start();
 
     // BACKGROUND ATTACH THREAD:
     // Enables overlay GUI & floating logo to appear immediately upon launching,
@@ -243,6 +245,7 @@ static int start_overlay() {
     }
 
     // SYMMETRICAL REVERSE CLEANUP ON NORMAL EXIT
+    domain_logger::stop();
     shutdown();
     Touch_Close();
     aimbot::thread_stop();
