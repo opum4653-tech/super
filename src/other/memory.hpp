@@ -1,14 +1,8 @@
 #pragma once
 // ============================================================================
-// KPM MEMORY ENGINE & PROCESS RESOLVER
+// MEMORY ENGINE & PROCESS RESOLVER (SYSCALL 270)
 // ============================================================================
-// Project: crack_master (Pure KPM Memory Integration)
-// Sourced from: pewpew (C:\Users\Sajala\Documents\mods\refer\pewpew)
-//
-// All external syscall memory methods (process_vm_readv / process_vm_writev)
-// have been removed. All reads and writes are routed exclusively through KPM:
-// - TB KPM:  PRCTL_MEM_READ (0x63687501) / PRCTL_MEM_WRITE (0x63687502)
-// - Neo KPM: NA_PRCTL_MAGIC (0x4E41)
+// Project: crack_master
 // ============================================================================
 
 #include <atomic>
@@ -114,100 +108,21 @@ inline bool is_valid_ptr(uint64_t a) {
 inline bool addr_valid(uint64_t a) { return (a >= 0x10000ULL); }
 
 // ============================================================================
-// KPM MEMORY READ & WRITE (EXCLUSIVE ENGINE)
+// PROCESS MEMORY READ
 // ============================================================================
-
-// Default-deny write guard. The caller must open a short-lived Scope for the
-// exact address/size it intends to write. No gameplay state may be written
-// outside that scope; the scope is thread-local, stack-bound, and never persisted.
-namespace mem_guard {
-    inline thread_local uint64_t allowed_addr = 0;
-    inline thread_local size_t   allowed_size = 0;
-
-    inline bool allows(uint64_t a, size_t l) {
-        return allowed_addr == a && allowed_size == l;
-    }
-
-    struct Scope {
-        Scope(uint64_t a, size_t l) {
-            allowed_addr = a;
-            allowed_size = l;
-        }
-        ~Scope() {
-            allowed_addr = 0;
-            allowed_size = 0;
-        }
-        Scope(const Scope&) = delete;
-        Scope& operator=(const Scope&) = delete;
-    };
-}
 
 inline bool mem_read(uint64_t a, void* b, size_t l) {
     if (proc::pid <= 0 || a < 0x10000 || l == 0 || b == nullptr) return false;
-    // Clear first: a KPM engine that reports success without actually copying
-    // must never leave stale bytes in caller buffers (PlayerSpan, matrix, etc.).
+    // Clear first so a failed or partial read never leaves stale bytes.
     memset(b, 0, l);
     kpm.initialize(proc::pid);
     return kpm.read(static_cast<uintptr_t>(a), b, l);
-}
-
-inline bool mem_write(uint64_t a, const void* b, size_t l) {
-    if (!mem_guard::allows(a, l)) return false;
-    if (proc::pid <= 0 || !is_valid_ptr(a) || l == 0 || b == nullptr) return false;
-    kpm.initialize(proc::pid);
-    return kpm.write(static_cast<uintptr_t>(a), b, l);
 }
 
 template<typename T> inline T rpm(uint64_t a) {
     T v{};
     mem_read(a, &v, sizeof(T));
     return v;
-}
-
-// Small-write path with read-back verification and stack-local rollback.
-// No write happens unless the original bytes were read successfully, and a
-// failed verification restores those exact bytes before returning false.
-inline bool mem_write_verified(uint64_t a, const void* b, size_t l,
-                               const void* knownOriginal = nullptr) {
-    if (!mem_guard::allows(a, l)) return false;
-    if (b == nullptr || l == 0) return false;
-
-    constexpr size_t kVerifyMax = 64;
-    if (l > kVerifyMax) return false; // no silent unverified write path
-
-    uint8_t before[kVerifyMax];
-    if (knownOriginal != nullptr) {
-        std::memcpy(before, knownOriginal, l);
-    } else if (!mem_read(a, before, l)) {
-        return false; // fail closed: unknown original
-    }
-
-    if (!mem_write(a, b, l)) return false;
-
-    auto rollback = [&]() {
-        if (mem_write(a, before, l)) {
-            uint8_t check[kVerifyMax];
-            if (mem_read(a, check, l) && memcmp(check, before, l) == 0) {
-                kpm.diag.rollback_ok++;
-                return;
-            }
-        }
-        kpm.diag.rollback_failed++;
-    };
-
-    uint8_t back[kVerifyMax];
-    if (!mem_read(a, back, l)) {
-        kpm.diag.failed_verified_writes++;
-        rollback();
-        return false;
-    }
-    if (memcmp(back, b, l) != 0) {
-        kpm.diag.failed_verified_writes++;
-        rollback();
-        return false;
-    }
-    kpm.diag.verified_writes++;
-    return true;
 }
 
 // Confirm one cached pid still belongs to the target.
@@ -259,14 +174,6 @@ inline int get_pid() {
         return proc::pid_cache;
     }
     proc::pid_cache = 0;
-
-    // Direct Neo KPM PID query if available (from pewpew)
-    pid_t neo_pid = kpm.get_pid_neo(oxorany("com.dts.freefiremax"));
-    if (neo_pid > 0) {
-        proc::pid_cache = neo_pid;
-        kpm.initialize(neo_pid);
-        return neo_pid;
-    }
 
     int pfd = sys::openat(AT_FDCWD, oxorany("/proc"), O_RDONLY | O_DIRECTORY);
     if (pfd < 0) return -1;

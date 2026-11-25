@@ -1,12 +1,11 @@
 #pragma once
 // ============================================================================
-// TARGET ACQUISITION & SCORING PIPELINE (MATCHING STORM_MODS EXACT ENGINE)
+// TARGET ACQUISITION & SCORING PIPELINE
 // ============================================================================
 // Project: crack_master
 //
 // SYSTEM ROLE:
-// Evaluates all detected enemy entities against FOV limits and crosshair proximity.
-// Matches STORM_MODS Server.cpp lines 1123-1170:
+// Evaluates all detected enemy entities against FOV limits and crosshair proximity:
 // - Dynamic crosshair distance scoring on every frame (zero sticky lock).
 // - When the crosshair is moved away or the enemy leaves FOV, lock immediately releases.
 // ============================================================================
@@ -112,6 +111,13 @@ namespace aimbot {
         if (bestEnemy) {
             result.target = *bestEnemy;
             result.bestScreenPos = bestEnemy->Head;
+            if (rc.aimHeadBias != 0.0f) {
+                const matrix vm = data::get_view_matrix();
+                Vector3 biased = WorldToScreenPoint(vm, bestEnemy->getHeadAimPoint(rc.aimHeadBias));
+                if (biased.z >= 0.001f && std::isfinite(biased.x) && std::isfinite(biased.y)) {
+                    result.bestScreenPos = biased;
+                }
+            }
             result.valid = true;
         }
 

@@ -7,9 +7,8 @@
 // SYSTEM ROLE:
 // Shared foundation header for all sub-modules of the aim suite:
 // - target.hpp   (Acquisition & scoring)
-// - aim.hpp      (Single head-only drag-shot trajectory writer)
+// - aim.hpp      (Touch-guided head assist)
 // - fov.hpp      (Screen FOV circle & target ring rendering)
-// - motion.hpp   (Air flight & phantom mode modifiers)
 // ============================================================================
 
 #ifndef IMGUI_DEFINE_MATH_OPERATORS

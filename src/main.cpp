@@ -8,7 +8,7 @@
 // - Android_draw/draw.h       -> NativeSurface ANativeWindow creation & EGL context setup
 // - ui/menu.hpp               -> ImGui emerald-green native touch UI menu rendering
 // - protect/license.hpp       -> RAM-only HTTPS key validation & memfd CA security handshake
-// - other/memory.hpp          -> KPM (Kernel Patch Module) memory engine (from pewpew)
+// - other/memory.hpp          -> Syscall 270 process memory engine
 // - other/display_manager.hpp -> Zero-fork sysfs/property display metrics cache
 // - other/settings_guard.hpp  -> Android block_untrusted_touches state capture & reverse restore
 // - game/data.hpp             -> Entity dictionary scraper thread & world-to-screen matrix sync
@@ -174,7 +174,7 @@ static int start_overlay() {
     // Initialize virtual digitizer / uinput event injection for touch pass-through
     Touch_Init(displayInfo.width, displayInfo.height, displayInfo.orientation, false);
 
-    // Initialize KPM (from pewpew)
+    // Initialize memory engine
     kpm.init(true);
 
     // BACKGROUND ATTACH THREAD:

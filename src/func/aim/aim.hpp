@@ -10,7 +10,6 @@
 #include "common.hpp"
 #include "target.hpp"
 #include "fov.hpp"
-#include "motion.hpp"
 #include "Android_touch/TouchHelperA.h"
 #include <thread>
 #include <atomic>
@@ -41,16 +40,15 @@ namespace aimbot {
         const float dy = acq.bestScreenPos.y - cy;
         const float err = sqrtf(dx * dx + dy * dy);
 
-        // AimFov sets the touch strength: a wide circle carries the aim faster,
-        // a narrow circle is a gentle nudge. 180 = full step, 0 = dead.
-        float fovNorm = 1.0f;
-        if (rc.aimFovRadius > 0.0f) {
-            fovNorm = (rc.aimFovRadius - err) / rc.aimFovRadius;
-            if (fovNorm < 0.0f) fovNorm = 0.0f;
-            if (fovNorm > 1.0f) fovNorm = 1.0f;
+        // Already centered on head — release touch so official aim/camera stays free.
+        if (!std::isfinite(err) || err < 0.5f) {
+            if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
+            return;
         }
 
-        float step = rc.aimPullStepPx * fovNorm;
+        // Full head pull anywhere inside AimFov (no edge attenuation that stalls
+        // outside center), bounded by Pull Step so touch drag stays smooth.
+        float step = (rc.aimPullStepPx > 0.0f) ? rc.aimPullStepPx : err;
         if (!std::isfinite(step) || step < 0.0f) step = 0.0f;
         if (step > err) step = err;
         if (step < 0.5f) {
@@ -108,8 +106,6 @@ namespace aimbot {
                 continue;
             }
 
-            motion::update(); // Zero-op; motion exploits stay disabled.
-
             // acquire_target() already drops every enemy outside the AimFov
             // circle, so the circle itself is the head-carry boundary.
             TargetAcquisitionResult acq = acquire_target(localPlayer);
@@ -130,10 +126,6 @@ namespace aimbot {
         waitLock.unlock();
         if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
         clear_target_snapshot();
-    }
-
-    inline void update() {
-        // Handled by aim_loop on real state-change events.
     }
 
     inline void thread_start() {

@@ -89,18 +89,11 @@ namespace aim {
     }
 }
 
-namespace motion {
-    inline bool  air_flight    = false; // Air Flight elevation modifier
-    inline float flight_height = 0.0f;  // 0.0f default: fully controlled from menu slider
-    inline bool  phantom_mode  = false; // Phantom Mode entity visibility
-}
-
 inline bool any_feature_enabled() {
     if (!master_enabled) return false;
     return aim::enable || esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
-           esp::tracer || esp::loot || esp::crosshair || esp::firing_ind ||
-           motion::air_flight || motion::phantom_mode;
+           esp::tracer || esp::loot || esp::crosshair || esp::firing_ind;
 }
 
 // ---------------------------------------------------------------------------

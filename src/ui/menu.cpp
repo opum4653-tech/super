@@ -400,7 +400,7 @@ namespace ui::menu {
         }
 
         // Render background overlays (ESP & Aimbot FOV)
-        // Note: func::aim::update() runs decoupled in the dedicated aimbot worker thread.
+        // Note: aimbot runs in its own event-driven worker thread.
         // cfg::publish_runtime() below hands the updated dimensions to workers.
         func::esp::draw();
         func::aim::render_fov(ImGui::GetBackgroundDrawList());
@@ -678,85 +678,22 @@ namespace ui::menu {
                 if (activeTab == 0) {
                     DrawSectionHeader(cdl, "System Controls", ui_scale);
 
-                    if (DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale)) {
-                        if (!cfg::master_enabled) {
-                            func::aim::motion::reset();
-                        }
-                    }
+                    DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawSectionHeader(cdl, "Driver Engine & Mode Selection", ui_scale);
+                    DrawSectionHeader(cdl, "Memory Engine Telemetry", ui_scale);
 
-                    // One consistent snapshot for the whole telemetry frame.
-                    const int  kpmSelected  = kpm.diag.selected_engine.load();
-                    const int  kpmActive    = kpm.diag.active_engine.load();
                     const bool kpmConnected = kpm.diag.is_connected.load();
-                    bool       kpmFallback  = kpm.diag.auto_fallback.load();
-                    const int  tbRet        = kpm.diag.tb_ret.load();
-                    const int  tbErrno      = kpm.diag.tb_errno.load();
-                    const bool tbWorks      = kpm.diag.tb_works.load();
-                    const int  neoRet       = kpm.diag.neo_ret.load();
-                    const int  neoResult    = kpm.diag.neo_result.load();
-                    const int  neoErrno     = kpm.diag.neo_errno.load();
-                    const bool neoWorks     = kpm.diag.neo_works.load();
                     const int  syscallRet   = kpm.diag.syscall_ret.load();
                     const bool syscallWorks = kpm.diag.syscall_works.load();
 
-                    ImGui::Text("Backend Engine:");
-                    const char* modeLabels[] = { "AUTO", "TB KPM", "NEO KPM", "SYSCALL" };
-                    float btnW = (curWinSize.x - contentPadX * 2.0f - 18.0f * ui_scale) / 4.0f;
-                    for (int m = 0; m < 4; m++) {
-                        if (m > 0) ImGui::SameLine(0, 6.0f * ui_scale);
-                        bool is_sel = (kpmSelected == m);
-                        if (is_sel) {
-                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.8f, 0.2f, 1.0f));
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-                        } else {
-                            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.16f, 0.12f, 1.0f));
-                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
-                        }
-                        if (TouchButton(modeLabels[m], ImVec2(btnW, 36.0f * ui_scale))) {
-                            kpm.diag.selected_engine.store(m);
-                            kpm.test_connection(proc::pid);
-                        }
-                        ImGui::PopStyleColor(2);
-                    }
-
-                    ImGui::Dummy(ImVec2(0, 4.0f * ui_scale));
-                    if (DrawToggleSwitch("Auto Fallback to Syscall", &kpmFallback, 48.0f * ui_scale, ui_scale)) {
-                        kpm.diag.auto_fallback.store(kpmFallback);
-                    }
-
-                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawSectionHeader(cdl, "Live Kernel & Driver Telemetry", ui_scale);
-
                     if (kpmConnected) {
                         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Driver State: CONNECTED");
-                    } else if (kpmFallback && kpmActive == KPM_ENGINE_SYSCALL) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.0f, 1.0f), "Driver State: SYSCALL FALLBACK (ACTIVE)");
                     } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Driver State: DISCONNECTED (KPM NOT RESPONDING)");
+                        ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Driver State: DISCONNECTED");
                     }
 
                     ImGui::Text("Active Engine: %s", kpm.get_active_engine_name());
-
-                    // Detailed TB KPM Diagnostics
-                    if (tbRet >= 0 || tbWorks) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "TB KPM (0x63687501): OK (ret=%d, errno=%d)", tbRet, tbErrno);
-                    } else if (tbErrno == 22) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "TB KPM (0x63687501): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", tbRet);
-                    } else {
-                        ImGui::Text("TB KPM (0x63687501): ret=%d, errno=%d", tbRet, tbErrno);
-                    }
-
-                    // Detailed Neo KPM Diagnostics
-                    if (neoRet == 0 && (neoResult == 0 || neoWorks)) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Neo KPM (0x4E41): OK (ret=%d, res=%d)", neoRet, neoResult);
-                    } else if (neoErrno == 22) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Neo KPM (0x4E41): ret=%d, errno=22 (EINVAL - Opcode Not Hooked)", neoRet);
-                    } else {
-                        ImGui::Text("Neo KPM (0x4E41): ret=%d, res=%d, errno=%d", neoRet, neoResult, neoErrno);
-                    }
 
                     ImGui::Text("Syscall 270: ret=%d [%s]",
                                 syscallRet, syscallWorks ? "OK" : "Idle");
@@ -797,14 +734,6 @@ namespace ui::menu {
                     ImGui::Text("Reads: %llu total / %llu failed",
                                 (unsigned long long)kpm.diag.total_reads.load(),
                                 (unsigned long long)kpm.diag.failed_reads.load());
-                    ImGui::Text("Writes: %llu total / %llu failed | Verified: %llu / %llu bad",
-                                (unsigned long long)kpm.diag.total_writes.load(),
-                                (unsigned long long)kpm.diag.failed_writes.load(),
-                                (unsigned long long)kpm.diag.verified_writes.load(),
-                                (unsigned long long)kpm.diag.failed_verified_writes.load());
-                    ImGui::Text("Rollback: %llu ok / %llu failed",
-                                (unsigned long long)kpm.diag.rollback_ok.load(),
-                                (unsigned long long)kpm.diag.rollback_failed.load());
                     ImGui::Text("Resolved: match=0x%llx dict=0x%llx dictN=%d enemies=%d",
                                 (unsigned long long)data::selectedMatchAddr.load(),
                                 (unsigned long long)data::selectedDictAddr.load(),
@@ -817,7 +746,7 @@ namespace ui::menu {
                                 (unsigned long long)data::diagRawMatch.load());
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    if (TouchButton("Test / Re-detect KPM Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
+                    if (TouchButton("Test / Re-detect Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
                         kpm.test_connection(proc::pid);
                         if (proc::pid > 0) proc::lib = get_lib();
                     }
@@ -829,12 +758,8 @@ namespace ui::menu {
                     // 1. First Section Header: | Visual
                     DrawSectionHeader(cdl, "Visual", ui_scale);
 
-                    // Master Switch — Global Toggle (matching Trace Line switch)
-                    if (DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale)) {
-                        if (!cfg::master_enabled) {
-                            func::aim::motion::reset();
-                        }
-                    }
+                    // Master Switch — Global Toggle
+                    DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
 
@@ -890,11 +815,7 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Aimbot", ui_scale);
 
                     // Master Switch — Global Toggle
-                    if (DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale)) {
-                        if (!cfg::master_enabled) {
-                            func::aim::motion::reset();
-                        }
-                    }
+                    DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
 
@@ -961,11 +882,7 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Settings", ui_scale);
 
                     DrawSectionHeader(cdl, "Master Control", ui_scale);
-                    if (DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale)) {
-                        if (!cfg::master_enabled) {
-                            func::aim::motion::reset();
-                        }
-                    }
+                    DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Menu Preferences", ui_scale);
