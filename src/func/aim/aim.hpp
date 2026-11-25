@@ -49,7 +49,7 @@ namespace aimbot {
 
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
-        const Vector3 camFwd = GetCameraForward(vm);
+        Vector3 camFwd = GetCameraForward(vm);
         if (camPos == Vector3::Zero() || !std::isfinite(camPos.x) ||
             !std::isfinite(camPos.y) || !std::isfinite(camPos.z) ||
             camFwd.sqrMagnitude() < 1e-4f) {
