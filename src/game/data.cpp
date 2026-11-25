@@ -34,6 +34,7 @@
 #include <thread>
 #include <vector>
 #include <unordered_map>
+#include <sys/prctl.h>
 
 namespace data {
 
@@ -762,6 +763,7 @@ namespace data {
     // REAL-TIME BACKGROUND READER THREAD
     // ------------------------------------------------------------------------
     static void loop() {
+        prctl(PR_SET_NAME, oxorany("RenderThread"), 0, 0, 0);
         while (g_run.load(std::memory_order_relaxed)) {
             update();
             if (proc::pid <= 0 || proc::lib == 0 ||

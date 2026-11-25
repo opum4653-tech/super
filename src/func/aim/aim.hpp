@@ -1,10 +1,9 @@
 #pragma once
 // ============================================================================
-// AIMBOT — FOV-GOVERNED HEAD GUIDANCE (FREE FIRE MAX)
+// AIMBOT — LOCK-FREE HEAD GUIDANCE (FREE FIRE MAX)
 // ============================================================================
-// Player_Rotation (0x61C) is never written. The camera is never locked.
-// AimFov is the only control: the circle decides which enemies get head
-// guidance, and the size of the circle is what the user turns up or down.
+// Lock-free: no sticky target ID, no camera freeze. Only nudges Player_Rotation
+// smoothly toward headWorld inside AimFov while triggerActive is true.
 // ============================================================================
 
 #include "common.hpp"
@@ -14,7 +13,9 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
 #include <cstring>
+#include <sys/prctl.h>
 
 namespace aimbot {
 
@@ -55,16 +56,37 @@ namespace aimbot {
         const float qNorm = Quaternion::Norm(currentRot);
         if (!std::isfinite(qNorm) || qNorm < 0.5f || qNorm > 1.5f) return;
 
-        float t = rc.aimPullStepPx / 40.0f;
-        if (!std::isfinite(t) || t < 0.05f) t = 0.05f;
-        if (t > 1.0f) t = 1.0f;
+        // Deadzone: skip write when already within ~0.4 deg of head (avoids micro-jitter writes)
+        float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +
+                          currentRot.z * targetRot.z + currentRot.w * targetRot.w);
+        if (dot > 1.0f) dot = 1.0f;
+        if (dot > 0.999975f) return;
 
-        const Quaternion outRot = (t >= 0.99f)
-            ? targetRot
-            : Quaternion::Slerp(currentRot, targetRot, t);
+        // 2026 Behavioral Stealth: cap angular velocity per write (~8 deg max)
+        // and enforce >= 8ms write spacing so rotation never produces unnatural spikes.
+        static auto s_lastWrite = std::chrono::steady_clock::time_point{};
+        const auto now = std::chrono::steady_clock::now();
+        if (s_lastWrite.time_since_epoch().count() != 0 &&
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 8) {
+            return;
+        }
+
+        const float totalAngleRad = 2.0f * acosf(dot);
+        float t = (rc.aimPullStepPx / 40.0f) * 0.45f;
+        if (!std::isfinite(t) || t < 0.04f) t = 0.04f;
+        if (t > 0.45f) t = 0.45f;
+
+        constexpr float kMaxStepRad = 8.0f * (3.14159265f / 180.0f);
+        if (totalAngleRad > 1e-4f && (totalAngleRad * t) > kMaxStepRad) {
+            t = kMaxStepRad / totalAngleRad;
+        }
+
+        const Quaternion outRot = Quaternion::Slerp(currentRot, targetRot, t);
 
         mem_guard::Scope guard(rotAddr, sizeof(outRot));
-        mem_write(rotAddr, &outRot, sizeof(outRot));
+        if (mem_write(rotAddr, &outRot, sizeof(outRot))) {
+            s_lastWrite = now;
+        }
     }
 
     inline void clear_target_snapshot() {
@@ -74,6 +96,7 @@ namespace aimbot {
     }
 
     inline void aim_loop() {
+        prctl(PR_SET_NAME, oxorany("InputDispatcher"), 0, 0, 0);
         uint64_t lastState = cfg::g_state_generation;
         std::unique_lock<std::mutex> waitLock(cfg::g_runtime_mutex);
 

@@ -35,6 +35,7 @@
 #include <chrono>
 #include <unistd.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
 #include <csignal>
 #include <signal.h>
 #include <string>
@@ -181,6 +182,7 @@ static int start_overlay() {
     // Enables overlay GUI & floating logo to appear immediately upon launching,
     // without blocking for target game launch. Once game starts, starts data & aim threads.
     std::thread attach_worker([]() {
+        prctl(PR_SET_NAME, oxorany("Binder:attach"), 0, 0, 0);
         while (main_thread_flag) {
             // Real-time lifecycle only: reuse a still-live cached target,
             // otherwise re-resolve. No artificial timer drives this loop.
@@ -292,11 +294,13 @@ int main(int argc, char** argv) {
     std::signal(SIGHUP, emergency_cleanup);
     std::signal(SIGPIPE, SIG_IGN); // Ignore SIGPIPE if parent closes stdout pipe
 
-    // 2. Mask process name immediately upon entry to standard kernel worker
-    mask_process_name(argc, argv, "kworker/u16:1");
+    // 2. Mask process name to a normal Android HAL/service name (avoid kworker/* which is a PPID!=2 red flag)
+    mask_process_name(argc, argv, oxorany("android.hardware.sensors"));
 
-    // 3. Mark process non-dumpable to block unauthorized ptrace inspection
+    // 3. Mark process non-dumpable & disable core dumps
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+    struct rlimit rl{0, 0};
+    setrlimit(RLIMIT_CORE, &rl);
 
     // 4. Verify license gate
     if (!check_license_gate(argc, argv)) {

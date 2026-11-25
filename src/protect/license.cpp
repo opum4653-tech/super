@@ -198,7 +198,7 @@ namespace lic {
         }
 
         // Match launcher's Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        FILE* fp = popen("settings get secure android_id 2>/dev/null", "r");
+        FILE* fp = popen(oxorany("settings get secure android_id 2>/dev/null"), "r");
         if (fp) {
             char aid[128] = {0};
             if (fgets(aid, sizeof(aid), fp)) {
@@ -245,7 +245,7 @@ namespace lic {
 
     static bool verify_license_online(const std::string& key) {
         std::string hwid = get_device_hwid();
-        std::string server_url = "https://crackmaster.shop";
+        std::string server_url = oxorany("https://crackmaster.shop");
         const char* env_url = getenv("CRACKMASTER_SERVER_URL");
         if (!env_url) env_url = getenv("AUTH_SERVER_URL");
         if (env_url && strlen(env_url) > 0) {
@@ -263,7 +263,7 @@ namespace lic {
             if (!curl) return false;
 
             std::string curl_resp;
-            std::string endpoint = base_url + "/api/verify.php";
+            std::string endpoint = base_url + oxorany("/api/verify.php");
 
             std::string enc_key = url_encode(curl, key);
             std::string enc_hwid = url_encode(curl, hwid);
@@ -272,7 +272,7 @@ namespace lic {
             struct curl_slist* headers = nullptr;
             headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
             headers = curl_slist_append(headers, "Accept: application/json");
-            headers = curl_slist_append(headers, "User-Agent: CrackMaster-Core/2.0");
+            headers = curl_slist_append(headers, oxorany("User-Agent: CrackMaster-Core/2.0"));
 
             curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_fields.c_str());
