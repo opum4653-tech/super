@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -250,7 +251,7 @@ namespace domain_logger {
             if (n <= 0) continue;
 
             // Only inspect outgoing packets
-            if (sll.sll_pkttype == PACKET_INCOMING) continue;
+            if (sll.sll_pkttype != PACKET_OUTGOING) continue;
 
             size_t ip_off = 0;
             if (sll.sll_hatype == ARPHRD_ETHER) {
