@@ -22,9 +22,22 @@ namespace aimbot {
     inline std::atomic<bool> g_aim_running{false};
     inline std::thread       g_aim_thread;
 
+    inline Quaternion quat_mul(const Quaternion& a, const Quaternion& b) {
+        return Quaternion(
+            a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+            a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+        );
+    }
+
+    inline Quaternion quat_conj(const Quaternion& q) {
+        return Quaternion(-q.x, -q.y, -q.z, q.w);
+    }
+
     // Lock-free head guidance via Player_Rotation (0x61C).
-    // No sticky target ID, no camera freeze: only nudges/aligns toward headWorld
-    // when triggerActive is true and a target is inside AimFov.
+    // Uses crosshair-relative delta (camForward -> dirToHead) so any scope/shoulder
+    // pitch offset or recoil is automatically canceled without locking the camera.
     inline void write_head_aim(uint64_t localPlayer,
                                const cfg::RuntimeConfig& rc,
                                const TargetAcquisitionResult& acq,
@@ -36,25 +49,33 @@ namespace aimbot {
 
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
+        const Vector3 camFwd = GetCameraForward(vm);
         if (camPos == Vector3::Zero() || !std::isfinite(camPos.x) ||
-            !std::isfinite(camPos.y) || !std::isfinite(camPos.z)) {
+            !std::isfinite(camPos.y) || !std::isfinite(camPos.z) ||
+            camFwd.sqrMagnitude() < 1e-4f) {
             return;
         }
 
-        const Vector3 headPos = acq.target.getHeadAimPoint(rc.aimHeadBias);
+        // Bone::Head (0x6A8) sits near the crown of the head; nudge -0.05m to center on face.
+        const Vector3 headPos = acq.target.getHeadAimPoint(rc.aimHeadBias - 0.05f);
         Vector3 dir = headPos - camPos;
         if (dir.sqrMagnitude() < 1e-4f || !std::isfinite(dir.x) ||
             !std::isfinite(dir.y) || !std::isfinite(dir.z)) {
             return;
         }
 
-        const Quaternion targetRot = Quaternion::LookRotation(dir.normalized());
+        const Quaternion qCam  = Quaternion::LookRotation(camFwd);
+        const Quaternion qHead = Quaternion::LookRotation(dir.normalized());
+        const Quaternion qDelta = quat_mul(qHead, quat_conj(qCam));
+
         const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
 
         Quaternion currentRot{};
         if (!mem_read(rotAddr, &currentRot, sizeof(currentRot))) return;
         const float qNorm = Quaternion::Norm(currentRot);
         if (!std::isfinite(qNorm) || qNorm < 0.5f || qNorm > 1.5f) return;
+
+        const Quaternion targetRot = Quaternion::Normalize(quat_mul(qDelta, currentRot));
 
         // Deadzone: skip write when already within ~0.4 deg of head (avoids micro-jitter writes)
         float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +

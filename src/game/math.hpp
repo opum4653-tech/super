@@ -119,6 +119,28 @@ inline Vector3 GetCameraPosition(const matrix& m) {
     );
 }
 
+// Computes unit forward vector of the camera center ray (x_ndc=0, y_ndc=0, w>0)
+inline Vector3 GetCameraForward(const matrix& m) {
+    float a11 = m.m11, a12 = m.m21, a13 = m.m31;
+    float a21 = m.m12, a22 = m.m22, a23 = m.m32;
+    float a31 = m.m14, a32 = m.m24, a33 = m.m34;
+
+    float det = a11 * (a22 * a33 - a23 * a32)
+                - a12 * (a21 * a33 - a23 * a31)
+                + a13 * (a21 * a32 - a22 * a31);
+
+    if (fabsf(det) < 0.0001f) return Vector3::Forward();
+    float inv = 1.0f / det;
+
+    // Solve M * d = (0, 0, 1) where row 3 is col4
+    Vector3 fwd(
+        (a12 * a23 - a13 * a22) * inv,
+        (a13 * a21 - a11 * a23) * inv,
+        (a11 * a22 - a12 * a21) * inv
+    );
+    return fwd.normalized();
+}
+
 // ----------------------------------------------------------------------------
 // WORLD-TO-SCREEN (W2S) PERSPECTIVE PROJECTION
 // ----------------------------------------------------------------------------
