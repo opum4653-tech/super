@@ -81,9 +81,11 @@ namespace aimbot {
                 s_fingerX = anchorX;
                 s_fingerY = anchorY;
                 Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
+                return; // Let Android/Unity register Touch_Down before first Move
             }
-            float dragStep = (rc.aimPullStepPx > 0.0f) ? rc.aimPullStepPx : 12.0f;
-            if (dragStep > err) dragStep = err;
+            // Scale touch drag (2.5x) so it overcomes Free Fire's chest aim-assist pull
+            float dragStep = (rc.aimPullStepPx > 0.0f) ? (rc.aimPullStepPx * 2.5f) : 24.0f;
+            if (dragStep > err * 1.5f) dragStep = err * 1.5f;
             float nx = s_fingerX + (dx / err) * dragStep;
             float ny = s_fingerY + (dy / err) * dragStep;
             if (nx < minX || nx > maxX || ny < minY || ny > maxY) {
@@ -138,20 +140,21 @@ namespace aimbot {
         if (dot > 1.0f) dot = 1.0f;
         if (dot > 0.999990f) return;
 
-        // Safe 16ms (~60Hz) cadence and 4.5 deg max step per write
+        // 8ms cadence and 12 deg max step so rotation overcomes official chest magnetism
+        // while staying smooth and lock-free.
         static auto s_lastWrite = std::chrono::steady_clock::time_point{};
         const auto now = std::chrono::steady_clock::now();
         if (s_lastWrite.time_since_epoch().count() != 0 &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 16) {
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 8) {
             return;
         }
 
         const float totalAngleRad = 2.0f * acosf(dot);
-        float t = (rc.aimPullStepPx / 40.0f) * 0.35f;
-        if (!std::isfinite(t) || t < 0.04f) t = 0.04f;
-        if (t > 0.35f) t = 0.35f;
+        float t = (rc.aimPullStepPx / 40.0f) * 0.75f;
+        if (!std::isfinite(t) || t < 0.08f) t = 0.08f;
+        if (t > 0.75f) t = 0.75f;
 
-        constexpr float kMaxStepRad = 4.5f * (3.14159265f / 180.0f);
+        constexpr float kMaxStepRad = 12.0f * (3.14159265f / 180.0f);
         if (totalAngleRad > 1e-4f && (totalAngleRad * t) > kMaxStepRad) {
             t = kMaxStepRad / totalAngleRad;
         }
