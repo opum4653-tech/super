@@ -25,16 +25,6 @@ namespace aimbot {
     constexpr int            kAimTouchSlot = 7;
     inline float             s_fingerX = 0.0f;
     inline float             s_fingerY = 0.0f;
-    inline bool              s_carryActive = false;
-    inline bool              s_carryDone   = false;
-    inline uint64_t          s_carryTarget = 0;
-    inline std::chrono::steady_clock::time_point s_carryStart{};
-
-    inline void reset_carry_state() {
-        s_carryActive = false;
-        s_carryDone   = false;
-        s_carryTarget = 0;
-    }
 
     inline void release_aim_finger() {
         if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
@@ -64,12 +54,10 @@ namespace aimbot {
                                bool triggerActive) {
         if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f) {
             release_aim_finger();
-            reset_carry_state();
             return;
         }
         if (!is_valid_ptr(localPlayer)) {
             release_aim_finger();
-            reset_carry_state();
             return;
         }
 
@@ -116,30 +104,7 @@ namespace aimbot {
 
         release_aim_finger();
 
-        // 2. Carry-then-release Player_Rotation (0x61C) head guidance (no continuous head lock)
-        if (rc.aimTriggerMode == 1 && acq.target.addr != s_carryTarget) {
-            s_carryActive = false;
-            s_carryDone   = false;
-        }
-        if (s_carryDone) {
-            return;
-        }
-
-        const auto now = std::chrono::steady_clock::now();
-        if (!s_carryActive) {
-            s_carryActive = true;
-            s_carryTarget = acq.target.addr;
-            s_carryStart  = now;
-        } else {
-            const auto elapsedMs =
-                std::chrono::duration_cast<std::chrono::milliseconds>(now - s_carryStart).count();
-            if (elapsedMs >= 120) {
-                s_carryDone   = true;
-                s_carryActive = false;
-                return;
-            }
-        }
-
+        // 2. Direct Player_Rotation (0x61C) head carry while firing inside AimFov (STORM_MODS pattern)
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
         if (camPos == Vector3::Zero() || !std::isfinite(camPos.x) ||
@@ -200,7 +165,6 @@ namespace aimbot {
             if (!active || !is_valid_ptr(localPlayer)) {
                 activeTrigger = false;
                 release_aim_finger();
-                reset_carry_state();
                 clear_target_snapshot();
                 waitLock.lock();
                 continue;
@@ -226,7 +190,6 @@ namespace aimbot {
 
         waitLock.unlock();
         release_aim_finger();
-        reset_carry_state();
         clear_target_snapshot();
     }
 
