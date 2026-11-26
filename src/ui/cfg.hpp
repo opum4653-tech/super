@@ -65,7 +65,7 @@ namespace esp {
 
 namespace aim {
     inline bool  enable           = false; // Aimbot Headshot (Free Fire MAX)
-    inline bool  zero_write       = false; // Default OFF: Use Player_Rotation (0x61C) smooth head carry
+    inline bool  zero_write       = true;  // Default ON: 100% Read-Only + uinput Touch (Anti-Ban)
     inline bool  show_fov         = false; // Render FOV Circle
     inline float aim_fov          = 45.0f;  // AimFov: head-carry circle (0 = use pixel radius)
     inline float fov_radius       = 200.0f; // Fallback pixel radius when AimFov is 0

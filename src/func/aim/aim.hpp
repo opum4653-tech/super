@@ -22,108 +22,123 @@ namespace aimbot {
 
     inline std::atomic<bool> g_aim_running{false};
     inline std::thread       g_aim_thread;
-    constexpr int            kAimTouchSlot = 7;
+    constexpr int            kAimTouchSlot = 8;
     inline float             s_fingerX = 0.0f;
     inline float             s_fingerY = 0.0f;
+    inline uint64_t          s_lastTouchGen = 0;
+
+    // Adaptive sensitivity estimator: learns screen-px per touch-px in real time
+    inline float             s_autoSens = 1.0f;
+    inline bool              s_hasPrevStep = false;
+    inline uint64_t          s_prevTarget = 0;
+    inline float             s_prevDx = 0.0f;
+    inline float             s_prevDy = 0.0f;
+    inline float             s_lastStepX = 0.0f;
+    inline float             s_lastStepY = 0.0f;
 
     inline void release_aim_finger() {
         if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
         s_fingerX = 0.0f;
         s_fingerY = 0.0f;
+        s_hasPrevStep = false;
     }
 
-    inline Quaternion quat_mul(const Quaternion& a, const Quaternion& b) {
-        return Quaternion(
-            a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
-            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
-            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
-            a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
-        );
-    }
-
-    inline Quaternion quat_conj(const Quaternion& q) {
-        return Quaternion(-q.x, -q.y, -q.z, q.w);
-    }
-
-    // Lock-free head guidance:
-    // - Zero-Write Touch Mode (default, anti-blacklist): pure uinput touch drag, 0 memory writes.
-    // - Rotation Assist Mode (when Zero-Write is OFF): rate-limited 60Hz / 4.5 deg Player_Rotation Slerp.
+    // 100% Zero-Write Touch Head Guidance (Anti-Ban):
+    // Pure memory read (Head + ViewMatrix + IsFiring) + adaptive closed-loop uinput drag.
+    // Automatically calibrates to in-game sensitivity so aim reaches head in milliseconds.
     inline void write_head_aim(uint64_t localPlayer,
                                const cfg::RuntimeConfig& rc,
                                const TargetAcquisitionResult& acq,
-                               bool triggerActive) {
-        if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f) {
+                               bool triggerActive,
+                               uint64_t stateGen) {
+        if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f || !is_valid_ptr(localPlayer)) {
             release_aim_finger();
             return;
         }
-        if (!is_valid_ptr(localPlayer)) {
+
+        // Only step when a fresh entity/camera snapshot arrived so we never
+        // double-apply the same stale (dx, dy) error across multiple ticks.
+        if (stateGen == s_lastTouchGen) {
+            return;
+        }
+        s_lastTouchGen = stateGen;
+
+        const float cx = rc.screenW * 0.5f;
+        const float cy = rc.screenH * 0.5f;
+        const float dx = acq.bestScreenPos.x - cx;
+        const float dy = acq.bestScreenPos.y - cy;
+        const float err = sqrtf(dx * dx + dy * dy);
+        if (!std::isfinite(err)) {
             release_aim_finger();
             return;
         }
 
-        if (rc.aimZeroWrite) {
-            const float cx = rc.screenW * 0.5f;
-            const float cy = rc.screenH * 0.5f;
-            const float dx = acq.bestScreenPos.x - cx;
-            const float dy = acq.bestScreenPos.y - cy;
-            const float err = sqrtf(dx * dx + dy * dy);
-            if (!std::isfinite(err) || err < 1.5f) {
-                release_aim_finger();
-                return;
+        // Update online sensitivity estimate from the previous swipe response
+        if (s_hasPrevStep && acq.target.addr == s_prevTarget) {
+            const float stepLen = sqrtf(s_lastStepX * s_lastStepX + s_lastStepY * s_lastStepY);
+            if (stepLen >= 4.0f) {
+                const float movedX = s_prevDx - dx;
+                const float movedY = s_prevDy - dy;
+                const float projMove = (movedX * s_lastStepX + movedY * s_lastStepY) / stepLen;
+                if (projMove > 0.5f && std::isfinite(projMove)) {
+                    float ratio = projMove / stepLen;
+                    if (ratio < 0.20f) ratio = 0.20f;
+                    if (ratio > 5.00f) ratio = 5.00f;
+                    s_autoSens = s_autoSens * 0.65f + ratio * 0.35f;
+                }
             }
-
-            const float anchorX = rc.screenW * 0.72f;
-            const float anchorY = rc.screenH * 0.45f;
-            const float minX = rc.screenW * 0.55f, maxX = rc.screenW * 0.92f;
-            const float minY = rc.screenH * 0.12f, maxY = rc.screenH * 0.88f;
-
-            if (!IsFingerDown(kAimTouchSlot) || s_fingerX <= 0.0f) {
-                s_fingerX = anchorX;
-                s_fingerY = anchorY;
-                Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
-                return; // Let Android/Unity register Touch_Down before first Move
-            }
-            // Scale touch drag (2.5x) so it overcomes Free Fire's chest aim-assist pull
-            float dragStep = (rc.aimPullStepPx > 0.0f) ? (rc.aimPullStepPx * 2.5f) : 24.0f;
-            if (dragStep > err * 1.5f) dragStep = err * 1.5f;
-            float nx = s_fingerX + (dx / err) * dragStep;
-            float ny = s_fingerY + (dy / err) * dragStep;
-            if (nx < minX || nx > maxX || ny < minY || ny > maxY) {
-                Touch_Up_Slot(kAimTouchSlot);
-                s_fingerX = anchorX;
-                s_fingerY = anchorY;
-                Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
-                nx = s_fingerX + (dx / err) * dragStep;
-                ny = s_fingerY + (dy / err) * dragStep;
-            }
-            s_fingerX = nx;
-            s_fingerY = ny;
-            Touch_Move_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
-            return;
         }
 
-        release_aim_finger();
-
-        // 2. Direct Player_Rotation (0x61C) head carry while firing inside AimFov (STORM_MODS pattern)
-        const matrix vm = data::get_view_matrix();
-        const Vector3 camPos = GetCameraPosition(vm);
-        if (camPos == Vector3::Zero() || !std::isfinite(camPos.x) ||
-            !std::isfinite(camPos.y) || !std::isfinite(camPos.z)) {
-            return;
+        if (err < 2.0f) {
+            s_hasPrevStep = false;
+            return; // Keep finger down on target without micro-jitter
         }
 
-        const Vector3 headPos = acq.target.getHeadAimPoint(rc.aimHeadBias);
-        Vector3 dir = headPos - camPos;
-        if (dir.sqrMagnitude() < 1e-4f || !std::isfinite(dir.x) ||
-            !std::isfinite(dir.y) || !std::isfinite(dir.z)) {
-            return;
+        // Empty upper-right camera zone (avoids Fire button & right-thumb HUD)
+        const float anchorX = rc.screenW * 0.62f;
+        const float anchorY = rc.screenH * 0.28f;
+        const float minX = rc.screenW * 0.45f, maxX = rc.screenW * 0.88f;
+        const float minY = rc.screenH * 0.10f, maxY = rc.screenH * 0.65f;
+
+        if (!IsFingerDown(kAimTouchSlot) || s_fingerX <= 0.0f) {
+            s_fingerX = anchorX;
+            s_fingerY = anchorY;
+            Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
         }
 
-        const Quaternion targetRot = Quaternion::Normalize(Quaternion::LookRotation(dir.normalized()));
-        const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
+        // Adaptive step: (0.78 / s_autoSens) carries crosshair onto head in 1-2 frames
+        const float userScale = (rc.aimPullStepPx > 0.0f) ? (rc.aimPullStepPx / 22.0f) : 1.0f;
+        const float gain = (0.78f / s_autoSens) * userScale;
+        float stepX = dx * gain;
+        float stepY = dy * gain;
+        const float stepLen = sqrtf(stepX * stepX + stepY * stepY);
+        const float maxStep = 160.0f * userScale;
+        if (stepLen > maxStep && stepLen > 1e-4f) {
+            const float s = maxStep / stepLen;
+            stepX *= s;
+            stepY *= s;
+        }
 
-        mem_guard::Scope guard(rotAddr, sizeof(targetRot));
-        mem_write(rotAddr, &targetRot, sizeof(targetRot));
+        float nx = s_fingerX + stepX;
+        float ny = s_fingerY + stepY;
+        if (nx < minX || nx > maxX || ny < minY || ny > maxY) {
+            Touch_Up_Slot(kAimTouchSlot);
+            s_fingerX = anchorX;
+            s_fingerY = anchorY;
+            Touch_Down_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
+            nx = s_fingerX + stepX;
+            ny = s_fingerY + stepY;
+        }
+        s_fingerX = nx;
+        s_fingerY = ny;
+        Touch_Move_Slot(kAimTouchSlot, s_fingerX, s_fingerY);
+
+        s_hasPrevStep = true;
+        s_prevTarget  = acq.target.addr;
+        s_prevDx      = dx;
+        s_prevDy      = dy;
+        s_lastStepX   = stepX;
+        s_lastStepY   = stepY;
     }
 
     inline void clear_target_snapshot() {
@@ -137,21 +152,11 @@ namespace aimbot {
         uint64_t lastState = cfg::g_state_generation;
         std::unique_lock<std::mutex> waitLock(cfg::g_runtime_mutex);
 
-        bool activeTrigger = false;
         while (g_aim_running.load(std::memory_order_relaxed)) {
-            if (activeTrigger) {
-                // While actively firing on a valid target, wake every 3ms so chest
-                // aim-assist does not pull the crosshair back down between scrapes.
-                cfg::g_state_cv.wait_for(waitLock, std::chrono::milliseconds(3), [&]() {
-                    return !g_aim_running.load(std::memory_order_relaxed) ||
-                           cfg::g_state_generation != lastState;
-                });
-            } else {
-                cfg::g_state_cv.wait(waitLock, [&]() {
-                    return !g_aim_running.load(std::memory_order_relaxed) ||
-                           cfg::g_state_generation != lastState;
-                });
-            }
+            cfg::g_state_cv.wait(waitLock, [&]() {
+                return !g_aim_running.load(std::memory_order_relaxed) ||
+                       cfg::g_state_generation != lastState;
+            });
             if (!g_aim_running.load(std::memory_order_relaxed)) break;
             lastState = cfg::g_state_generation;
             waitLock.unlock();
@@ -163,7 +168,6 @@ namespace aimbot {
                 ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
 
             if (!active || !is_valid_ptr(localPlayer)) {
-                activeTrigger = false;
                 release_aim_finger();
                 clear_target_snapshot();
                 waitLock.lock();
@@ -181,9 +185,8 @@ namespace aimbot {
 
             const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
             const bool triggerActive = (rc.aimTriggerMode == 1) || isFiring;
-            activeTrigger = triggerActive && acq.valid;
 
-            write_head_aim(localPlayer, rc, acq, triggerActive);
+            write_head_aim(localPlayer, rc, acq, triggerActive, lastState);
 
             waitLock.lock();
         }
