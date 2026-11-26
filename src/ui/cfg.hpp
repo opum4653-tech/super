@@ -65,10 +65,10 @@ namespace esp {
 
 namespace aim {
     inline bool  enable           = false; // Aimbot Headshot (Free Fire MAX)
-    inline bool  zero_write       = true;  // Default ON: 100% Read-Only + uinput Touch (Anti-Ban)
-    inline bool  show_fov         = false; // Render FOV Circle
-    inline float aim_fov          = 45.0f;  // AimFov: head-carry circle (0 = use pixel radius)
-    inline float fov_radius       = 200.0f; // Fallback pixel radius when AimFov is 0
+    inline bool  zero_write       = false; // Player_Rotation (0x61C) smooth Slerp
+    inline bool  show_fov         = false; // Disabled: use official game FOV
+    inline float aim_fov          = 0.0f;  // 0 = use official game FOV cone
+    inline float fov_radius       = 0.0f;
 
     inline float head_bias        = 0.0f;
     inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
@@ -80,14 +80,8 @@ namespace aim {
     inline float pull_step_px     = 22.0f;
 
     inline float get_fov_radius() {
-        if (aim_fov > 0.0f && g_sw > 0.0f) {
-            return (aim_fov / 180.0f) * (g_sw * 0.55f);
-        }
-        if (fov_radius > 0.0f) {
-            return fov_radius;
-        }
-        // Neither configured: 25% of screen width (~270 px on a 1080-wide view).
-        return (g_sw > 0.0f) ? (g_sw * 0.25f) : 250.0f;
+        // 0 = no code-side FOV limit; use the game's own official range/FOV
+        return 0.0f;
     }
 }
 
@@ -203,13 +197,7 @@ inline void publish_runtime() {
     s.screenW         = g_sw;
     s.screenH         = g_sh;
 
-    if (aim::aim_fov > 0.0f && g_sw > 0.0f) {
-        s.aimFovRadius = (aim::aim_fov / 180.0f) * (g_sw * 0.55f);
-    } else if (aim::fov_radius > 0.0f) {
-        s.aimFovRadius = aim::fov_radius;
-    } else {
-        s.aimFovRadius = (g_sw > 0.0f) ? (g_sw * 0.25f) : 250.0f;
-    }
+    s.aimFovRadius = 0.0f;
 
     bool changed = false;
     {

@@ -400,11 +400,10 @@ namespace ui::menu {
             g_sh = realH;
         }
 
-        // Render background overlays (ESP & Aimbot FOV)
+        // Render background overlays (ESP)
         // Note: aimbot runs in its own event-driven worker thread.
         // cfg::publish_runtime() below hands the updated dimensions to workers.
         func::esp::draw();
-        func::aim::render_fov(ImGui::GetBackgroundDrawList());
 
         // Dynamic responsive UI scaling (aligned with Kernel project: 1.0 at 1080p)
         float ui_scale = realH / 1080.0f;
@@ -763,23 +762,16 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
 
                     DrawToggleSwitch("Aimbot Headshot (Max FF)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Zero-Write Touch (Anti-Blacklist)", &cfg::aim::zero_write, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Draw FOV Circle", &cfg::aim::show_fov, 48.0f * ui_scale, ui_scale);
                     DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
-                    DrawSectionHeader(cdl, "AimFov - Head Carry", ui_scale);
+                    DrawSectionHeader(cdl, "Aim Smoothness", ui_scale);
 
                     ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##AimFov", &cfg::aim::aim_fov, 0.0f, 180.0f, "%.0f deg");
-                    ImGui::TextDisabled("Raise = bigger circle = bullets carried to the head");
+                    ImGui::SliderFloat("##PullStep", &cfg::aim::pull_step_px, 1.0f, 40.0f, "%.0f");
+                    ImGui::TextDisabled("Carry Smoothness (higher = faster head carry)");
 
-                    ImGui::TextDisabled("Official game range only - no code-side distance filter.");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##PullStep", &cfg::aim::pull_step_px, 1.0f, 40.0f, "%.0f px");
-                    ImGui::TextDisabled("Pull Step (touch drag strength inside the circle)");
+                    ImGui::TextDisabled("Official game FOV & range - no custom FOV circle.");
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
                     const char* triggerModes[] = { "When Firing", "Always In FOV" };
