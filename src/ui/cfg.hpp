@@ -63,17 +63,15 @@ namespace esp {
     inline ImVec4 weapon_col      = ImVec4(1.0f, 0.85f, 0.30f, 1.0f);
 }
 
-namespace touch_aim_cfg {
-    inline bool  enable           = false; // Separate Zero-Write uinput Touch Aim
-    inline int   trigger_mode     = 0;     // 0 = When Firing, 1 = Always Active
-    inline int   priority_mode    = 0;     // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
+namespace aim {
+    inline bool  enable           = false; // STORM_MODS AimBot (no AimFov)
+    inline int   trigger_mode     = 0;     // 0 = When Firing, 1 = Firing or Scoped
     inline bool  ignore_bots      = false;
-    inline float strength         = 1.0f;  // Drag strength multiplier (0.3x - 2.5x)
 }
 
 inline bool any_feature_enabled() {
     if (!master_enabled) return false;
-    return touch_aim_cfg::enable ||
+    return aim::enable ||
            esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair || esp::firing_ind;
@@ -87,11 +85,9 @@ inline bool any_feature_enabled() {
 // ---------------------------------------------------------------------------
 struct RuntimeConfig {
     bool  master            = false;
-    bool  touchEnable       = false;
-    float touchStrength     = 1.0f;
-    bool  touchIgnoreBots   = false;
-    int   touchTriggerMode  = 0;
-    int   touchPriorityMode = 0;
+    bool  aimEnable         = false;
+    bool  aimIgnoreBots     = false;
+    int   aimTriggerMode    = 0;
     float espMaxRange       = 0.0f;
     float espLootRange      = 0.0f;
     bool  espBox            = false;
@@ -111,11 +107,9 @@ struct RuntimeConfig {
 
     bool equals(const RuntimeConfig& o) const {
         return master == o.master &&
-               touchEnable == o.touchEnable &&
-               touchStrength == o.touchStrength &&
-               touchIgnoreBots == o.touchIgnoreBots &&
-               touchTriggerMode == o.touchTriggerMode &&
-               touchPriorityMode == o.touchPriorityMode &&
+               aimEnable == o.aimEnable &&
+               aimIgnoreBots == o.aimIgnoreBots &&
+               aimTriggerMode == o.aimTriggerMode &&
                espMaxRange == o.espMaxRange &&
                espLootRange == o.espLootRange &&
                espBox == o.espBox &&
@@ -151,11 +145,9 @@ inline void notify_state_change() {
 inline void publish_runtime() {
     RuntimeConfig s;
     s.master            = master_enabled;
-    s.touchEnable       = touch_aim_cfg::enable;
-    s.touchStrength     = touch_aim_cfg::strength;
-    s.touchIgnoreBots   = touch_aim_cfg::ignore_bots;
-    s.touchTriggerMode  = touch_aim_cfg::trigger_mode;
-    s.touchPriorityMode = touch_aim_cfg::priority_mode;
+    s.aimEnable         = aim::enable;
+    s.aimIgnoreBots     = aim::ignore_bots;
+    s.aimTriggerMode    = aim::trigger_mode;
     s.espMaxRange     = esp::max_range;
     s.espLootRange    = esp::loot_range;
     s.espBox          = esp::box;

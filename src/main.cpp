@@ -28,7 +28,7 @@
 #include "game/data.hpp"
 #include "game/Offsets.h"
 #include "func/esp.hpp"
-#include "func/aim/touch_aim.hpp"
+#include "func/aim/aim.hpp"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -203,13 +203,13 @@ static int start_overlay() {
                     uint64_t gfCell = rpm<uint64_t>(proc::lib + Offsets::Base::GameFacade);
                     if (elfMagic == 0x464C457F || gfCell > 0x10000) {
                         data::thread_start();
-                        touch_aim::thread_start();
+                        aimbot::thread_start();
 
                         // Exit the active session the moment the target PID
                         // disappears, with bounded sleep to avoid busy-spinning.
                         while (main_thread_flag) {
                             if (proc::pid <= 0 || ::kill(proc::pid, 0) != 0) {
-                                touch_aim::thread_stop();
+                                aimbot::thread_stop();
                                 data::thread_stop();
                                 proc::pid_cache = 0;
                                 break;
@@ -249,7 +249,7 @@ static int start_overlay() {
     log_shield::stop();
     shutdown();
     Touch_Close();
-    touch_aim::thread_stop();
+    aimbot::thread_stop();
     data::thread_stop();
     settings_guard::restore();
     return 0;

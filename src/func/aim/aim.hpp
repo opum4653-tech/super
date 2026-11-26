@@ -1,0 +1,137 @@
+#pragma once
+// ============================================================================
+// AIMBOT — STORM_MODS AimHardTh PATTERN (NO AIMFOV)
+// ============================================================================
+// Direct port of STORM_MODS AimBot (AimHardTh):
+// - Target selection via crosshair distance (no AimFov limit).
+// - Triggers on isFiring (0x850) or Weapon::IsSight (0x8A0) when enabled.
+// - Writes Quaternion::LookRotation((headWorld - camPos).normalized()) to
+//   localPlayer + Player_Rotation (0x61C) with STORM_MODS randomized 40-100ms
+//   human-like pacing.
+// ============================================================================
+
+#include "common.hpp"
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <mutex>
+#include <random>
+#include <sys/prctl.h>
+#include <thread>
+
+namespace aimbot {
+
+    inline std::atomic<bool> g_aim_running{false};
+    inline std::thread       g_aim_thread;
+
+    struct TargetResult {
+        PlayerData target;
+        bool valid = false;
+    };
+
+    inline TargetResult select_target(uint64_t localPlayer, const cfg::RuntimeConfig& rc) {
+        TargetResult result;
+        if (!is_valid_ptr(localPlayer)) return result;
+        if (rpm<bool>(localPlayer + Offsets::Player_IsDead)) return result;
+
+        std::vector<PlayerData> enemies;
+        {
+            std::lock_guard<std::mutex> lk(data::players_mutex);
+            enemies = data::players;
+        }
+        if (enemies.empty()) return result;
+
+        const float screenCx = rc.screenW * 0.5f;
+        const float screenCy = rc.screenH * 0.5f;
+
+        float bestScore = 9999999.0f;
+        const PlayerData* bestEnemy = nullptr;
+
+        for (const auto& enemy : enemies) {
+            if (enemy.Head.z < 0.001f) continue;
+            if (enemy.hpValid && enemy.curHP <= 0) continue;
+            if (enemy.isKnocked) continue;
+            if (rc.aimIgnoreBots && enemy.isBot) continue;
+
+            float dx = enemy.Head.x - screenCx;
+            float dy = enemy.Head.y - screenCy;
+            float score = sqrtf(dx * dx + dy * dy);
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestEnemy = &enemy;
+            }
+        }
+
+        if (bestEnemy) {
+            result.target = *bestEnemy;
+            result.valid = true;
+        }
+        return result;
+    }
+
+    inline bool is_player_sighted(uint64_t localPlayer) {
+        uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player_Weapon);
+        if (!is_valid_ptr(weapon)) return false;
+        return rpm<uint64_t>(weapon + Offsets::Weapon::IsSight) != 0;
+    }
+
+    inline void aim_loop() {
+        prctl(PR_SET_NAME, oxorany("InputDispatcher"), 0, 0, 0);
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<int> sleepDist(40, 100);
+
+        while (g_aim_running.load(std::memory_order_relaxed)) {
+            const cfg::RuntimeConfig rc = cfg::runtime();
+            const bool active = rc.master && rc.aimEnable &&
+                                data::inMatch.load(std::memory_order_relaxed);
+            const uint64_t localPlayer = active
+                ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
+
+            if (active && is_valid_ptr(localPlayer)) {
+                const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
+                const bool isSighted = (rc.aimTriggerMode == 1) ? is_player_sighted(localPlayer) : false;
+
+                if (isFiring || isSighted) {
+                    TargetResult acq = select_target(localPlayer, rc);
+                    if (acq.valid && acq.target.headWorld != Vector3::Zero()) {
+                        const matrix vm = data::get_view_matrix();
+                        const Vector3 camPos = GetCameraPosition(vm);
+                        if (camPos != Vector3::Zero() && std::isfinite(camPos.x) &&
+                            std::isfinite(camPos.y) && std::isfinite(camPos.z)) {
+                            Vector3 dir = acq.target.headWorld - camPos;
+                            if (dir.sqrMagnitude() > 1e-4f && std::isfinite(dir.x) &&
+                                std::isfinite(dir.y) && std::isfinite(dir.z)) {
+                                Quaternion targetRot = Quaternion::Normalize(
+                                    Quaternion::LookRotation(dir.normalized()));
+                                const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
+                                mem_guard::Scope guard(rotAddr, sizeof(targetRot));
+                                mem_write(rotAddr, &targetRot, sizeof(targetRot));
+                                std::this_thread::sleep_for(std::chrono::milliseconds(sleepDist(gen)));
+                            }
+                        }
+                    }
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+
+    inline void thread_start() {
+        if (g_aim_running.exchange(true)) return;
+        g_aim_thread = std::thread(aim_loop);
+    }
+
+    inline void thread_stop() {
+        if (!g_aim_running.exchange(false)) return;
+        if (g_aim_thread.joinable()) g_aim_thread.join();
+    }
+
+} // namespace aimbot
+
+namespace func {
+    namespace aim = ::aimbot;
+}
