@@ -26,6 +26,7 @@
 #include "kpm.h"
 #include "func/esp.hpp"
 #include "func/aim.hpp"
+#include "func/aim/touch_aim.hpp"
 #include "cfg.hpp"
 #include "game/data.hpp"
 #include <string>
@@ -788,6 +789,29 @@ namespace ui::menu {
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX official range, head only");
                     ImGui::TextDisabled("No camera write, no aim lock. Official lock stays in charge.");
+
+                    ImGui::Dummy(ImVec2(0, 12.0f * ui_scale));
+                    DrawSectionHeader(cdl, "Touch Aim (Zero-Write uinput)", ui_scale);
+
+                    DrawToggleSwitch("Touch Head Assist", &cfg::touch_aim_cfg::enable, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Touch Ignore AI Bots", &cfg::touch_aim_cfg::ignore_bots, 48.0f * ui_scale, ui_scale);
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::SliderFloat("##TouchStrength", &cfg::touch_aim_cfg::strength, 0.3f, 2.5f, "%.2fx");
+                    ImGui::TextDisabled("Touch Drag Strength (Auto-Sens Multiplier)");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    const char* touchTriggerModes[] = { "When Firing", "Always Active" };
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::Combo("##TouchTrigger", &cfg::touch_aim_cfg::trigger_mode, touchTriggerModes, 2);
+                    ImGui::TextDisabled("Touch Aim Trigger");
+
+                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
+                    const char* touchPriorityModes[] = { "Crosshair Distance", "Lowest HP", "3D Distance" };
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::Combo("##TouchPriority", &cfg::touch_aim_cfg::priority_mode, touchPriorityModes, 3);
+                    ImGui::TextDisabled("Touch Target Priority");
                 }
                 // ============================================================
                 // TAB 3: MOTION (ANTI-BAN PROTECTED)
@@ -860,6 +884,7 @@ namespace ui::menu {
         if (g_should_exit) {
             main_thread_flag = false;
             log_shield::stop();
+            touch_aim::thread_stop();
             Touch_Close();
             aimbot::thread_stop();
             data::thread_stop();

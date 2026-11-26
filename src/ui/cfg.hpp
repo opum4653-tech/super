@@ -72,9 +72,18 @@ namespace aim {
     inline float pull_step_px     = 22.0f;
 }
 
+namespace touch_aim_cfg {
+    inline bool  enable           = false; // Separate Zero-Write uinput Touch Aim
+    inline int   trigger_mode     = 0;     // 0 = When Firing, 1 = Always Active
+    inline int   priority_mode    = 0;     // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
+    inline bool  ignore_bots      = false;
+    inline float strength         = 1.0f;  // Drag strength multiplier (0.3x - 2.5x)
+}
+
 inline bool any_feature_enabled() {
     if (!master_enabled) return false;
-    return aim::enable || esp::box || esp::health || esp::armor ||
+    return aim::enable || touch_aim_cfg::enable ||
+           esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair || esp::firing_ind;
 }
@@ -92,6 +101,11 @@ struct RuntimeConfig {
     bool  aimIgnoreBots     = false;
     int   aimTriggerMode    = 0;
     int   aimPriorityMode   = 0;
+    bool  touchEnable       = false;
+    float touchStrength     = 1.0f;
+    bool  touchIgnoreBots   = false;
+    int   touchTriggerMode  = 0;
+    int   touchPriorityMode = 0;
     float espMaxRange       = 0.0f;
     float espLootRange      = 0.0f;
     bool  espBox            = false;
@@ -116,6 +130,11 @@ struct RuntimeConfig {
                aimIgnoreBots == o.aimIgnoreBots &&
                aimTriggerMode == o.aimTriggerMode &&
                aimPriorityMode == o.aimPriorityMode &&
+               touchEnable == o.touchEnable &&
+               touchStrength == o.touchStrength &&
+               touchIgnoreBots == o.touchIgnoreBots &&
+               touchTriggerMode == o.touchTriggerMode &&
+               touchPriorityMode == o.touchPriorityMode &&
                espMaxRange == o.espMaxRange &&
                espLootRange == o.espLootRange &&
                espBox == o.espBox &&
@@ -154,8 +173,13 @@ inline void publish_runtime() {
     s.aimEnable       = aim::enable;
     s.aimPullStepPx   = aim::pull_step_px;
     s.aimIgnoreBots   = aim::ignore_bots;
-    s.aimTriggerMode  = aim::trigger_mode;
-    s.aimPriorityMode = aim::priority_mode;
+    s.aimTriggerMode    = aim::trigger_mode;
+    s.aimPriorityMode   = aim::priority_mode;
+    s.touchEnable       = touch_aim_cfg::enable;
+    s.touchStrength     = touch_aim_cfg::strength;
+    s.touchIgnoreBots   = touch_aim_cfg::ignore_bots;
+    s.touchTriggerMode  = touch_aim_cfg::trigger_mode;
+    s.touchPriorityMode = touch_aim_cfg::priority_mode;
     s.espMaxRange     = esp::max_range;
     s.espLootRange    = esp::loot_range;
     s.espBox          = esp::box;
