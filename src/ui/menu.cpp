@@ -21,6 +21,7 @@
 #include "Android_draw/draw.h"
 #include "Android_touch/TouchHelperA.h"
 #include "other/settings_guard.hpp"
+#include "other/log_shield.hpp"
 #include "other/memory.hpp"
 #include "kpm.h"
 #include "func/esp.hpp"
@@ -885,6 +886,27 @@ namespace ui::menu {
                     DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
+                    DrawSectionHeader(cdl, "Network & Log Shield", ui_scale);
+                    DrawToggleSwitch("Log Shield (Drop Telemetry)", &cfg::log_shield, 48.0f * ui_scale, ui_scale);
+                    {
+                        auto st = log_shield::status();
+                        if (!cfg::log_shield || st.state == log_shield::State::Off) {
+                            ImGui::TextDisabled("Status: OFF (All domains open)");
+                        } else if (st.state == log_shield::State::WaitingUid) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                                               "Status: Waiting for game UID...");
+                        } else if (st.state == log_shield::State::Active) {
+                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f),
+                                               "Status: ACTIVE (UID %d | %d v4 / %d v6 IPs)",
+                                               st.uid, st.ip4Count, st.ip6Count);
+                        } else {
+                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
+                                               "Status: Apply failed (iptables unavailable)");
+                        }
+                        ImGui::TextDisabled("Drops only 12 crash/analytics/tracker domains; core game stays active.");
+                    }
+
+                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Menu Preferences", ui_scale);
 
                     ImGui::SliderFloat("##Opacity", &ui_opacity, 0.2f, 1.0f, "Opacity: %.2f");
@@ -909,10 +931,12 @@ namespace ui::menu {
         ImGui::PopStyleColor(20);
 
         cfg::publish_runtime();
+        log_shield::set_enabled(cfg::log_shield);
 
         // Deferred safe exit outside of ImGui frame
         if (g_should_exit) {
             main_thread_flag = false;
+            log_shield::stop();
             Touch_Close();
             aimbot::thread_stop();
             data::thread_stop();

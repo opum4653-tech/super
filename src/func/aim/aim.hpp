@@ -134,32 +134,27 @@ namespace aimbot {
 
         const Quaternion targetRot = Quaternion::Normalize(quat_mul(qDelta, currentRot));
 
-        // Deadzone (~0.25 deg) to prevent micro-jitter writes
+        // Deadzone (~0.15 deg) so scoped shots stay dead-center on head
         float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +
                           currentRot.z * targetRot.z + currentRot.w * targetRot.w);
         if (dot > 1.0f) dot = 1.0f;
-        if (dot > 0.999990f) return;
+        if (dot > 0.999996f) return;
 
-        // 8ms cadence and 12 deg max step so rotation overcomes official chest magnetism
-        // while staying smooth and lock-free.
+        // 4ms min spacing while firing so chest aim-assist cannot pull aim back down
         static auto s_lastWrite = std::chrono::steady_clock::time_point{};
         const auto now = std::chrono::steady_clock::now();
         if (s_lastWrite.time_since_epoch().count() != 0 &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 8) {
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 4) {
             return;
         }
 
-        const float totalAngleRad = 2.0f * acosf(dot);
-        float t = (rc.aimPullStepPx / 40.0f) * 0.75f;
-        if (!std::isfinite(t) || t < 0.08f) t = 0.08f;
-        if (t > 0.75f) t = 0.75f;
+        float t = rc.aimPullStepPx / 35.0f;
+        if (!std::isfinite(t) || t < 0.10f) t = 0.10f;
+        if (t > 1.0f) t = 1.0f;
 
-        constexpr float kMaxStepRad = 12.0f * (3.14159265f / 180.0f);
-        if (totalAngleRad > 1e-4f && (totalAngleRad * t) > kMaxStepRad) {
-            t = kMaxStepRad / totalAngleRad;
-        }
-
-        const Quaternion outRot = Quaternion::Slerp(currentRot, targetRot, t);
+        const Quaternion outRot = (t >= 0.99f)
+            ? targetRot
+            : Quaternion::Slerp(currentRot, targetRot, t);
 
         mem_guard::Scope guard(rotAddr, sizeof(outRot));
         if (mem_write(rotAddr, &outRot, sizeof(outRot))) {
@@ -178,11 +173,21 @@ namespace aimbot {
         uint64_t lastState = cfg::g_state_generation;
         std::unique_lock<std::mutex> waitLock(cfg::g_runtime_mutex);
 
+        bool activeTrigger = false;
         while (g_aim_running.load(std::memory_order_relaxed)) {
-            cfg::g_state_cv.wait(waitLock, [&]() {
-                return !g_aim_running.load(std::memory_order_relaxed) ||
-                       cfg::g_state_generation != lastState;
-            });
+            if (activeTrigger) {
+                // While actively firing on a valid target, wake every 8ms so chest
+                // aim-assist does not pull the crosshair back down between scrapes.
+                cfg::g_state_cv.wait_for(waitLock, std::chrono::milliseconds(8), [&]() {
+                    return !g_aim_running.load(std::memory_order_relaxed) ||
+                           cfg::g_state_generation != lastState;
+                });
+            } else {
+                cfg::g_state_cv.wait(waitLock, [&]() {
+                    return !g_aim_running.load(std::memory_order_relaxed) ||
+                           cfg::g_state_generation != lastState;
+                });
+            }
             if (!g_aim_running.load(std::memory_order_relaxed)) break;
             lastState = cfg::g_state_generation;
             waitLock.unlock();
@@ -194,6 +199,7 @@ namespace aimbot {
                 ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
 
             if (!active || !is_valid_ptr(localPlayer)) {
+                activeTrigger = false;
                 release_aim_finger();
                 clear_target_snapshot();
                 waitLock.lock();
@@ -211,6 +217,7 @@ namespace aimbot {
 
             const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
             const bool triggerActive = (rc.aimTriggerMode == 1) || isFiring;
+            activeTrigger = triggerActive && acq.valid;
 
             write_head_aim(localPlayer, rc, acq, triggerActive);
 

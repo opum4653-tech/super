@@ -27,6 +27,7 @@ extern float g_sh;
 namespace cfg {
 
     inline bool master_enabled = false; // Global Master Switch: controls all features, preserves selection state
+    inline bool log_shield     = false; // UID-scoped iptables DROP on secondary log/crash/tracker domains
 
 namespace esp {
 // Master
