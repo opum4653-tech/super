@@ -674,7 +674,7 @@ namespace ui::menu {
                 ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, 22.0f * ui_scale);
 
                 // ============================================================
-                // TAB 0: INFO & KPM LIVE TELEMETRY
+                // TAB 0: SYSTEM CONTROLS
                 // ============================================================
                 if (activeTab == 0) {
                     DrawSectionHeader(cdl, "System Controls", ui_scale);
@@ -682,73 +682,14 @@ namespace ui::menu {
                     DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawSectionHeader(cdl, "Memory Engine Telemetry", ui_scale);
+                    DrawSectionHeader(cdl, "Status", ui_scale);
 
-                    const bool kpmConnected = kpm.diag.is_connected.load();
-
-                    if (kpmConnected) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Driver State: CONNECTED");
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Driver State: DISCONNECTED");
-                        ImGui::TextDisabled("Probe: neo(ret=%d, res=%d, err=%d)",
-                                            kpm.diag.neo_ret.load(),
-                                            kpm.diag.neo_result.load(),
-                                            kpm.diag.neo_errno.load());
-                    }
-
-                    ImGui::Text("Active Engine: %s", kpm.get_active_engine_name());
-
-                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    DrawSectionHeader(cdl, "Target Process & Memory", ui_scale);
-
-                    if (proc::pid > 0) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Game PID: %d (Active Target)", proc::pid);
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Game PID: Searching (Free Fire)...");
-                    }
-
-                    if (proc::lib > 0) {
-                        uint32_t magic = kpm.read<uint32_t>(proc::lib);
-                        if (magic == 0x464C457F) {
-                            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "libil2cpp: 0x%lx (ELF OK: 0x464C457F)", (unsigned long)proc::lib);
-                        } else {
-                            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "libil2cpp: 0x%lx (Magic: 0x%08X FAIL)", (unsigned long)proc::lib, magic);
-                        }
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "libil2cpp: Not Resolved");
-                    }
-
-                    size_t pCount = 0;
-                    {
-                        std::lock_guard<std::mutex> lk(data::players_mutex);
-                        pCount = data::players.size();
-                    }
                     if (!cfg::master_enabled) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Entity Scraper: Standby (Master Switch is OFF)");
+                        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Mode: Standby");
                     } else if (!data::inMatch.load()) {
-                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Entity Scraper: Waiting for Match (In Lobby)");
+                        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Mode: Waiting for Match");
                     } else {
-                        ImGui::TextColored(pCount > 0 ? ImVec4(0.0f, 1.0f, 0.4f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
-                                           "Entity Scraper: %zu players in cache", pCount);
-                    }
-                    ImGui::Text("Reads: %llu total / %llu failed",
-                                (unsigned long long)kpm.diag.total_reads.load(),
-                                (unsigned long long)kpm.diag.failed_reads.load());
-                    ImGui::Text("Resolved: match=0x%llx dict=0x%llx dictN=%d enemies=%d",
-                                (unsigned long long)data::selectedMatchAddr.load(),
-                                (unsigned long long)data::selectedDictAddr.load(),
-                                data::selectedDictCount.load(),
-                                data::selectedEnemyCount.load());
-                    ImGui::Text("Chain: cell=0x%llx sf=0x%llx bg=0x%llx rawM=0x%llx",
-                                (unsigned long long)data::diagDirectCell.load(),
-                                (unsigned long long)data::diagStaticFields.load(),
-                                (unsigned long long)data::diagBaseGame.load(),
-                                (unsigned long long)data::diagRawMatch.load());
-
-                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    if (TouchButton("Test / Re-detect Connection", ImVec2(curWinSize.x - contentPadX * 2.0f, 40.0f * ui_scale))) {
-                        kpm.test_connection(proc::pid);
-                        if (proc::pid > 0) proc::lib = get_lib();
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Mode: Active");
                     }
                 }
                 // ============================================================
@@ -887,23 +828,18 @@ namespace ui::menu {
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
                     DrawSectionHeader(cdl, "Network & Log Shield", ui_scale);
-                    DrawToggleSwitch("Log Shield (Drop Telemetry)", &cfg::log_shield, 48.0f * ui_scale, ui_scale);
+                    DrawToggleSwitch("Log Shield", &cfg::log_shield, 48.0f * ui_scale, ui_scale);
                     {
                         auto st = log_shield::status();
                         if (!cfg::log_shield || st.state == log_shield::State::Off) {
-                            ImGui::TextDisabled("Status: OFF (All domains open)");
+                            ImGui::TextDisabled("Status: Off");
                         } else if (st.state == log_shield::State::WaitingUid) {
-                            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
-                                               "Status: Waiting for game UID...");
+                            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Status: Waiting");
                         } else if (st.state == log_shield::State::Active) {
-                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f),
-                                               "Status: ACTIVE (UID %d | %d v4 / %d v6 IPs)",
-                                               st.uid, st.ip4Count, st.ip6Count);
+                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Status: Active");
                         } else {
-                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f),
-                                               "Status: Apply failed (iptables unavailable)");
+                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Status: Unavailable");
                         }
-                        ImGui::TextDisabled("Drops only 12 crash/analytics/tracker domains; core game stays active.");
                     }
 
                     ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));

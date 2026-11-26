@@ -107,10 +107,8 @@ namespace aimbot {
         // 2. Gentle, rate-limited Player_Rotation (0x61C) head alignment (only when Zero-Write is OFF)
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
-        Vector3 camFwd = GetCameraForward(vm);
         if (camPos == Vector3::Zero() || !std::isfinite(camPos.x) ||
-            !std::isfinite(camPos.y) || !std::isfinite(camPos.z) ||
-            camFwd.sqrMagnitude() < 1e-4f) {
+            !std::isfinite(camPos.y) || !std::isfinite(camPos.z)) {
             return;
         }
 
@@ -121,9 +119,7 @@ namespace aimbot {
             return;
         }
 
-        const Quaternion qCam  = Quaternion::LookRotation(camFwd);
-        const Quaternion qHead = Quaternion::LookRotation(dir.normalized());
-        const Quaternion qDelta = quat_mul(qHead, quat_conj(qCam));
+        const Quaternion targetRot = Quaternion::Normalize(Quaternion::LookRotation(dir.normalized()));
 
         const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
 
@@ -132,24 +128,22 @@ namespace aimbot {
         const float qNorm = Quaternion::Norm(currentRot);
         if (!std::isfinite(qNorm) || qNorm < 0.5f || qNorm > 1.5f) return;
 
-        const Quaternion targetRot = Quaternion::Normalize(quat_mul(qDelta, currentRot));
-
         // Deadzone (~0.15 deg) so scoped shots stay dead-center on head
         float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +
                           currentRot.z * targetRot.z + currentRot.w * targetRot.w);
         if (dot > 1.0f) dot = 1.0f;
         if (dot > 0.999996f) return;
 
-        // 4ms min spacing while firing so chest aim-assist cannot pull aim back down
+        // 2ms min spacing while firing so chest aim-assist cannot pull aim back down
         static auto s_lastWrite = std::chrono::steady_clock::time_point{};
         const auto now = std::chrono::steady_clock::now();
         if (s_lastWrite.time_since_epoch().count() != 0 &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 4) {
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 2) {
             return;
         }
 
-        float t = rc.aimPullStepPx / 35.0f;
-        if (!std::isfinite(t) || t < 0.10f) t = 0.10f;
+        float t = rc.aimPullStepPx / 30.0f;
+        if (!std::isfinite(t) || t < 0.15f) t = 0.15f;
         if (t > 1.0f) t = 1.0f;
 
         const Quaternion outRot = (t >= 0.99f)
@@ -176,9 +170,9 @@ namespace aimbot {
         bool activeTrigger = false;
         while (g_aim_running.load(std::memory_order_relaxed)) {
             if (activeTrigger) {
-                // While actively firing on a valid target, wake every 8ms so chest
+                // While actively firing on a valid target, wake every 3ms so chest
                 // aim-assist does not pull the crosshair back down between scrapes.
-                cfg::g_state_cv.wait_for(waitLock, std::chrono::milliseconds(8), [&]() {
+                cfg::g_state_cv.wait_for(waitLock, std::chrono::milliseconds(3), [&]() {
                     return !g_aim_running.load(std::memory_order_relaxed) ||
                            cfg::g_state_generation != lastState;
                 });
