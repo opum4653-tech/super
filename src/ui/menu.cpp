@@ -794,6 +794,11 @@ namespace ui::menu {
                     DrawSectionHeader(cdl, "Touch Aim (Zero-Write uinput)", ui_scale);
 
                     DrawToggleSwitch("Touch Head Assist", &cfg::touch_aim_cfg::enable, 48.0f * ui_scale, ui_scale);
+                    if (Touch_IsUinputReady()) {
+                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Touch Driver: Ready (Type-B)");
+                    } else {
+                        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Touch Driver: Unavailable");
+                    }
                     DrawToggleSwitch("Touch Ignore AI Bots", &cfg::touch_aim_cfg::ignore_bots, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));

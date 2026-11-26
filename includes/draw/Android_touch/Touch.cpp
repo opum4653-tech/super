@@ -193,16 +193,14 @@ static void Upload() {
         return;
     }
     std::lock_guard<std::mutex> lock(s_uploadMutex);
-    static bool isFirstDown = true;
-    int tmpCnt = 0, tmpCnt2 = 0, i, j;
+    static bool s_touchActive = false;
+    static bool s_slotActive[maxF] = {false};
+    int tmpCnt = 0;
 
-    // If every held finger belongs to the overlay, there is nothing to forward.
-    // Writing here would emit a synthetic BTN_TOUCH=0 and the game would see a
-    // phantom finger-up mid-drag.
     bool anySwallowed = false;
     bool anyForwardable = false;
-    for (i = 0; i < fdNum; i++) {
-        for (j = 0; j < maxF; j++) {
+    for (int i = 0; i < fdNum; i++) {
+        for (int j = 0; j < maxF; j++) {
             if (Finger[i][j].isDown) {
                 if (Finger[i][j].swallow) anySwallowed = true;
                 else anyForwardable = true;
@@ -213,79 +211,65 @@ static void Upload() {
         return;
     }
 
-    for (i = 0; i < fdNum; i++) {
-        for (j = 0; j < maxF; j++) {
-            // Swallowed fingers never reach uinput: the gesture belongs to the
-            // overlay, and forwarding it would drive the game camera as well.
-            if (Finger[i][j].isDown && !Finger[i][j].swallow) {
-                if (tmpCnt2++ > 10) {
-                    goto finish;
-                }
-                input.event[tmpCnt].type = EV_ABS;
-                input.event[tmpCnt].code = ABS_X;
-                input.event[tmpCnt].value = Finger[i][j].x;
-                tmpCnt++;
+    // Aggregate per-slot state across touch devices (Type-B MT Protocol)
+    bool slotDown[maxF] = {false};
+    int slotX[maxF] = {0};
+    int slotY[maxF] = {0};
+    int slotId[maxF] = {0};
+    int activeCount = 0;
 
-                input.event[tmpCnt].type = EV_ABS;
-                input.event[tmpCnt].code = ABS_Y;
-                input.event[tmpCnt].value = Finger[i][j].y;
-                tmpCnt++;
-
-                input.event[tmpCnt].type = EV_ABS;
-                input.event[tmpCnt].code = ABS_MT_POSITION_X;
-                input.event[tmpCnt].value = Finger[i][j].x;
-                tmpCnt++;
-
-                input.event[tmpCnt].type = EV_ABS;
-                input.event[tmpCnt].code = ABS_MT_POSITION_Y;
-                input.event[tmpCnt].value = Finger[i][j].y;
-                tmpCnt++;
-
-                input.event[tmpCnt].type = EV_ABS;
-                input.event[tmpCnt].code = ABS_MT_TRACKING_ID;
-                input.event[tmpCnt].value = Finger[i][j].id;
-                tmpCnt++;
-
-                input.event[tmpCnt].type = EV_SYN;
-                input.event[tmpCnt].code = SYN_MT_REPORT;
-                input.event[tmpCnt].value = 0;
-                tmpCnt++;
+    for (int i = 0; i < fdNum; i++) {
+        for (int j = 0; j < maxF; j++) {
+            if (Finger[i][j].isDown && !Finger[i][j].swallow && !slotDown[j]) {
+                slotDown[j] = true;
+                slotX[j] = Finger[i][j].x;
+                slotY[j] = Finger[i][j].y;
+                slotId[j] = Finger[i][j].id;
+                activeCount++;
             }
         }
     }
-    finish:
-    bool is = false;
-    if (tmpCnt == 0) {
-        input.event[tmpCnt].type = EV_SYN;
-        input.event[tmpCnt].code = SYN_MT_REPORT;
-        input.event[tmpCnt].value = 0;
-        tmpCnt++;
-        if (!isFirstDown) {
-            isFirstDown = true;
-            input.event[tmpCnt].type = EV_KEY;
-            input.event[tmpCnt].code = BTN_TOUCH;
-            input.event[tmpCnt].value = 0;
-            tmpCnt++;
-            input.event[tmpCnt].type = EV_KEY;
-            input.event[tmpCnt].code = BTN_TOOL_FINGER;
-            input.event[tmpCnt].value = 0;
-            tmpCnt++;
-        }
-    } else {
-        is = true;
-    }
-    input.event[tmpCnt].type = EV_SYN;
-    input.event[tmpCnt].code = SYN_REPORT;
-    input.event[tmpCnt].value = 0;
-    tmpCnt++;
 
-    if (nowfd > 0) {
-        if (is && isFirstDown) {
-            isFirstDown = false;
-            write(nowfd, &input, sizeof(struct input_event) * (tmpCnt + 2));
-        } else {
-            write(nowfd, input.event, sizeof(struct input_event) * tmpCnt);
+    auto emit = [&](uint16_t type, uint16_t code, int32_t value) {
+        if (tmpCnt < 510) {
+            input.event[tmpCnt].type = type;
+            input.event[tmpCnt].code = code;
+            input.event[tmpCnt].value = value;
+            tmpCnt++;
         }
+    };
+
+    if (activeCount > 0 && !s_touchActive) {
+        s_touchActive = true;
+        emit(EV_KEY, BTN_TOUCH, 1);
+        emit(EV_KEY, BTN_TOOL_FINGER, 1);
+    }
+
+    for (int j = 0; j < maxF; j++) {
+        if (slotDown[j]) {
+            emit(EV_ABS, ABS_MT_SLOT, j);
+            if (!s_slotActive[j]) {
+                s_slotActive[j] = true;
+                emit(EV_ABS, ABS_MT_TRACKING_ID, slotId[j]);
+            }
+            emit(EV_ABS, ABS_MT_POSITION_X, slotX[j]);
+            emit(EV_ABS, ABS_MT_POSITION_Y, slotY[j]);
+        } else if (s_slotActive[j]) {
+            s_slotActive[j] = false;
+            emit(EV_ABS, ABS_MT_SLOT, j);
+            emit(EV_ABS, ABS_MT_TRACKING_ID, -1);
+        }
+    }
+
+    if (activeCount == 0 && s_touchActive) {
+        s_touchActive = false;
+        emit(EV_KEY, BTN_TOUCH, 0);
+        emit(EV_KEY, BTN_TOOL_FINGER, 0);
+    }
+
+    if (tmpCnt > 0) {
+        emit(EV_SYN, SYN_REPORT, 0);
+        write(nowfd, input.event, sizeof(struct input_event) * tmpCnt);
     }
 }
 
@@ -524,8 +508,7 @@ bool Touch_Init(int w, int h, uint32_t orientation_, bool readOnly) {
             ioctl(nowfd, UI_SET_PROPBIT, INPUT_PROP_DIRECT);
 
             ioctl(nowfd, UI_SET_EVBIT, EV_ABS);
-            ioctl(nowfd, UI_SET_ABSBIT, ABS_X);
-            ioctl(nowfd, UI_SET_ABSBIT, ABS_Y);
+            ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_SLOT);
             ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_POSITION_X);
             ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_POSITION_Y);
             ioctl(nowfd, UI_SET_ABSBIT, ABS_MT_TRACKING_ID);
@@ -537,14 +520,12 @@ bool Touch_Init(int w, int h, uint32_t orientation_, bool readOnly) {
             genRandomString(string, string_len);
             ioctl(nowfd, UI_SET_PHYS, string);
 
+            ui_dev.absmin[ABS_MT_SLOT] = 0;
+            ui_dev.absmax[ABS_MT_SLOT] = maxF - 1;
             ui_dev.absmin[ABS_MT_POSITION_X] = 0;
             ui_dev.absmax[ABS_MT_POSITION_X] = (int)s_digitizerMaxX;
             ui_dev.absmin[ABS_MT_POSITION_Y] = 0;
             ui_dev.absmax[ABS_MT_POSITION_Y] = (int)s_digitizerMaxY;
-            ui_dev.absmin[ABS_X] = 0;
-            ui_dev.absmax[ABS_X] = (int)s_digitizerMaxX;
-            ui_dev.absmin[ABS_Y] = 0;
-            ui_dev.absmax[ABS_Y] = (int)s_digitizerMaxY;
             ui_dev.absmin[ABS_MT_TRACKING_ID] = 0;
             ui_dev.absmax[ABS_MT_TRACKING_ID] = 65535;
             write(nowfd, &ui_dev, sizeof(ui_dev));
@@ -678,6 +659,10 @@ void Touch_Up() {
 bool IsFingerDown(int slot) {
     if (slot < 0 || slot >= maxF) return false;
     return Finger[0][slot].isDown;
+}
+
+bool Touch_IsUinputReady() {
+    return !Touch_readOnly && nowfd > 0;
 }
 
 bool GetFingerScreenPos(int slot, float& outX, float& outY) {

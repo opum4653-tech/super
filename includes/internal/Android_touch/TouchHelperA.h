@@ -44,6 +44,7 @@ inline void Touch_SetUiRect(float x, float y, float w, float h, bool active) {
 // Slot-addressed injection used by non-gesture callers.
 bool IsFingerDown(int slot);
 bool GetFingerScreenPos(int slot, float& outX, float& outY);
+bool Touch_IsUinputReady();
 void Touch_Down_Slot(int slot, float xt, float yt);
 void Touch_Move_Slot(int slot, float x, float y);
 void Touch_Up_Slot(int slot);

@@ -1,11 +1,13 @@
 #pragma once
 // ============================================================================
-// TOUCH AIM — SEPARATE 100% ZERO-WRITE UINPUT HEAD ASSIST (FREE FIRE MAX)
+// TOUCH AIM — ZOOM-AWARE ZERO-WRITE UINPUT TYPE-B HEAD ASSIST (FREE FIRE MAX)
 // ============================================================================
 // Independent from aim.hpp (Player_Rotation 0x61C).
-// Reads real game offsets (Head 0x6A8, ViewMatrix, Player_IsFiring 0x850)
-// via data::players / acquire_target() and injects closed-loop uinput touch
-// drags on slot 8. Zero game memory writes.
+// Uses real game offsets:
+// - Head (0x6A8), ViewMatrix, Player_IsFiring (0x850), Player_IsDead (0x7C)
+// - Player_Weapon (0x608) -> Weapon::IsSight (0x8A0) for zoom/scope detection
+// Injects MT Protocol Type-B uinput drags via Touch.cpp (slot 8) with separate
+// online sensitivity calibration for hipfire vs scoped zoom. Zero memory writes.
 // ============================================================================
 
 #include "common.hpp"
@@ -15,6 +17,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
 #include <cmath>
 #include <sys/prctl.h>
 
@@ -28,20 +31,30 @@ namespace touch_aim {
     inline float             s_fingerY = 0.0f;
     inline uint64_t          s_lastGen = 0;
 
-    // Online adaptive sensitivity estimator (screen-px per touch-px)
-    inline float             s_autoSens = 1.0f;
+    // Separate online sensitivity estimators for Hipfire vs Scoped Zoom
+    inline float             s_sensHip     = 1.0f;
+    inline float             s_sensScope   = 0.55f;
     inline bool              s_hasPrevStep = false;
-    inline uint64_t          s_prevTarget = 0;
-    inline float             s_prevDx = 0.0f;
-    inline float             s_prevDy = 0.0f;
-    inline float             s_lastStepX = 0.0f;
-    inline float             s_lastStepY = 0.0f;
+    inline bool              s_prevScoped  = false;
+    inline uint64_t          s_prevTarget  = 0;
+    inline float             s_prevDx      = 0.0f;
+    inline float             s_prevDy      = 0.0f;
+    inline float             s_lastStepX   = 0.0f;
+    inline float             s_lastStepY   = 0.0f;
 
     inline void release_finger() {
-        if (IsFingerDown(kTouchAimSlot)) Touch_Up_Slot(kTouchAimSlot);
+        if (IsFingerDown(kTouchAimSlot)) {
+            Touch_Up_Slot(kTouchAimSlot);
+        }
         s_fingerX = 0.0f;
         s_fingerY = 0.0f;
         s_hasPrevStep = false;
+    }
+
+    inline bool is_player_scoped(uint64_t localPlayer) {
+        uint64_t weapon = rpm<uint64_t>(localPlayer + Offsets::Player_Weapon);
+        if (!is_valid_ptr(weapon)) return false;
+        return rpm<uint64_t>(weapon + Offsets::Weapon::IsSight) != 0;
     }
 
     inline aimbot::TargetAcquisitionResult select_touch_target(uint64_t localPlayer,
@@ -57,11 +70,13 @@ namespace touch_aim {
         }
         if (enemies.empty()) return result;
 
+        const matrix vm = data::get_view_matrix();
         const float screenCx = rc.screenW * 0.5f;
         const float screenCy = rc.screenH * 0.5f;
 
         float bestScore = 9999999.0f;
         const PlayerData* bestEnemy = nullptr;
+        Vector3 bestScreen = Vector3::Zero();
 
         for (const auto& enemy : enemies) {
             if (enemy.Head.z < 0.001f) continue;
@@ -69,8 +84,14 @@ namespace touch_aim {
             if (enemy.isKnocked) continue;
             if (rc.touchIgnoreBots && enemy.isBot) continue;
 
-            float dxHead = enemy.Head.x - screenCx;
-            float dyHead = enemy.Head.y - screenCy;
+            // Project fresh headWorld against latest ViewMatrix for zoom accuracy
+            Vector3 proj = WorldToScreenPoint(vm, enemy.headWorld);
+            if (proj.z < 0.001f || !std::isfinite(proj.x) || !std::isfinite(proj.y)) {
+                proj = enemy.Head;
+            }
+
+            float dxHead = proj.x - screenCx;
+            float dyHead = proj.y - screenCy;
             float crosshairDist = sqrtf(dxHead * dxHead + dyHead * dyHead);
 
             float score = crosshairDist;
@@ -84,12 +105,13 @@ namespace touch_aim {
             if (score < bestScore) {
                 bestScore = score;
                 bestEnemy = &enemy;
+                bestScreen = proj;
             }
         }
 
         if (bestEnemy) {
             result.target = *bestEnemy;
-            result.bestScreenPos = bestEnemy->Head;
+            result.bestScreenPos = bestScreen;
             result.valid = true;
         }
         return result;
@@ -100,7 +122,8 @@ namespace touch_aim {
                                const aimbot::TargetAcquisitionResult& acq,
                                bool triggerActive,
                                uint64_t stateGen) {
-        if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f || !is_valid_ptr(localPlayer)) {
+        if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f ||
+            !is_valid_ptr(localPlayer) || !Touch_IsUinputReady()) {
             release_finger();
             return;
         }
@@ -108,6 +131,7 @@ namespace touch_aim {
         if (stateGen == s_lastGen) return;
         s_lastGen = stateGen;
 
+        const bool scoped = is_player_scoped(localPlayer);
         const float cx = rc.screenW * 0.5f;
         const float cy = rc.screenH * 0.5f;
         const float dx = acq.bestScreenPos.x - cx;
@@ -118,17 +142,19 @@ namespace touch_aim {
             return;
         }
 
-        if (s_hasPrevStep && acq.target.addr == s_prevTarget) {
+        // Update zoom-specific online sensitivity from previous swipe result
+        if (s_hasPrevStep && acq.target.addr == s_prevTarget && scoped == s_prevScoped) {
             const float stepLen = sqrtf(s_lastStepX * s_lastStepX + s_lastStepY * s_lastStepY);
-            if (stepLen >= 4.0f) {
+            if (stepLen >= 3.5f) {
                 const float movedX = s_prevDx - dx;
                 const float movedY = s_prevDy - dy;
                 const float projMove = (movedX * s_lastStepX + movedY * s_lastStepY) / stepLen;
                 if (projMove > 0.5f && std::isfinite(projMove)) {
                     float ratio = projMove / stepLen;
-                    if (ratio < 0.20f) ratio = 0.20f;
+                    if (ratio < 0.15f) ratio = 0.15f;
                     if (ratio > 5.00f) ratio = 5.00f;
-                    s_autoSens = s_autoSens * 0.65f + ratio * 0.35f;
+                    float& sensRef = scoped ? s_sensScope : s_sensHip;
+                    sensRef = sensRef * 0.65f + ratio * 0.35f;
                 }
             }
         }
@@ -140,21 +166,25 @@ namespace touch_aim {
 
         const float anchorX = rc.screenW * 0.62f;
         const float anchorY = rc.screenH * 0.28f;
-        const float minX = rc.screenW * 0.45f, maxX = rc.screenW * 0.88f;
+        const float minX = rc.screenW * 0.44f, maxX = rc.screenW * 0.88f;
         const float minY = rc.screenH * 0.10f, maxY = rc.screenH * 0.65f;
 
         if (!IsFingerDown(kTouchAimSlot) || s_fingerX <= 0.0f) {
             s_fingerX = anchorX;
             s_fingerY = anchorY;
             Touch_Down_Slot(kTouchAimSlot, s_fingerX, s_fingerY);
+            // Allow InputReader to commit ACTION_POINTER_DOWN before first MOVE
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
 
+        const float activeSens = scoped ? s_sensScope : s_sensHip;
         const float userScale = (rc.touchStrength > 0.0f) ? rc.touchStrength : 1.0f;
-        const float gain = (0.75f / s_autoSens) * userScale;
+        const float gain = (0.76f / activeSens) * userScale;
+
         float stepX = dx * gain;
         float stepY = dy * gain;
         const float stepLen = sqrtf(stepX * stepX + stepY * stepY);
-        const float maxStep = 150.0f * userScale;
+        const float maxStep = 140.0f * userScale;
         if (stepLen > maxStep && stepLen > 1e-4f) {
             const float s = maxStep / stepLen;
             stepX *= s;
@@ -165,9 +195,11 @@ namespace touch_aim {
         float ny = s_fingerY + stepY;
         if (nx < minX || nx > maxX || ny < minY || ny > maxY) {
             Touch_Up_Slot(kTouchAimSlot);
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
             s_fingerX = anchorX;
             s_fingerY = anchorY;
             Touch_Down_Slot(kTouchAimSlot, s_fingerX, s_fingerY);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
             nx = s_fingerX + stepX;
             ny = s_fingerY + stepY;
         }
@@ -176,6 +208,7 @@ namespace touch_aim {
         Touch_Move_Slot(kTouchAimSlot, s_fingerX, s_fingerY);
 
         s_hasPrevStep = true;
+        s_prevScoped  = scoped;
         s_prevTarget  = acq.target.addr;
         s_prevDx      = dx;
         s_prevDy      = dy;
