@@ -18,8 +18,8 @@
 #include <condition_variable>
 #include <chrono>
 #include <cmath>
-#include <cstdarg>
-#include <cstdio>
+#include <stdarg.h>
+#include <stdio.h>
 #include <sys/prctl.h>
 
 namespace touch_aim {
@@ -52,16 +52,17 @@ namespace touch_aim {
         };
         FILE* f = nullptr;
         for (const char* p : paths) {
-            f = std::fopen(p, "a");
+            f = fopen(p, "a");
             if (f) break;
         }
         if (!f) return;
+        char buf[512];
         va_list ap;
         va_start(ap, fmt);
-        std::vfprintf(f, fmt, ap);
+        vsnprintf(buf, sizeof(buf), fmt, ap);
         va_end(ap);
-        std::fputc('\n', f);
-        std::fclose(f);
+        fprintf(f, "%s\n", buf);
+        fclose(f);
     }
 
     inline void release_finger() {
