@@ -11,7 +11,6 @@
 // ============================================================================
 
 #include "common.hpp"
-#include "target.hpp"
 #include "Android_touch/TouchHelperA.h"
 #include <thread>
 #include <atomic>
@@ -19,6 +18,8 @@
 #include <condition_variable>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <sys/prctl.h>
 
 namespace touch_aim {
@@ -32,8 +33,8 @@ namespace touch_aim {
     inline uint64_t          s_lastGen = 0;
 
     // Separate online sensitivity estimators for Hipfire vs Scoped Zoom
-    inline float             s_sensHip     = 1.0f;
-    inline float             s_sensScope   = 0.55f;
+    inline float             s_sensHip     = 0.75f;
+    inline float             s_sensScope   = 0.45f;
     inline bool              s_hasPrevStep = false;
     inline bool              s_prevScoped  = false;
     inline uint64_t          s_prevTarget  = 0;
@@ -41,6 +42,27 @@ namespace touch_aim {
     inline float             s_prevDy      = 0.0f;
     inline float             s_lastStepX   = 0.0f;
     inline float             s_lastStepY   = 0.0f;
+    inline std::chrono::steady_clock::time_point s_lastLogTime{};
+
+    inline void write_diag_log(const char* fmt, ...) {
+        const char* paths[] = {
+            "/storage/emulated/0/Download/touch_aim_log.txt",
+            "/data/media/0/Download/touch_aim_log.txt",
+            "/sdcard/Download/touch_aim_log.txt"
+        };
+        FILE* f = nullptr;
+        for (const char* p : paths) {
+            f = std::fopen(p, "a");
+            if (f) break;
+        }
+        if (!f) return;
+        va_list ap;
+        va_start(ap, fmt);
+        std::vfprintf(f, fmt, ap);
+        va_end(ap);
+        std::fputc('\n', f);
+        std::fclose(f);
+    }
 
     inline void release_finger() {
         if (IsFingerDown(kTouchAimSlot)) {
@@ -57,9 +79,15 @@ namespace touch_aim {
         return rpm<uint64_t>(weapon + Offsets::Weapon::IsSight) != 0;
     }
 
-    inline aimbot::TargetAcquisitionResult select_touch_target(uint64_t localPlayer,
-                                                               const cfg::RuntimeConfig& rc) {
-        aimbot::TargetAcquisitionResult result;
+    struct TouchTargetResult {
+        PlayerData target;
+        Vector3 bestScreenPos = Vector3::Zero();
+        bool valid = false;
+    };
+
+    inline TouchTargetResult select_touch_target(uint64_t localPlayer,
+                                                   const cfg::RuntimeConfig& rc) {
+        TouchTargetResult result;
         if (!is_valid_ptr(localPlayer)) return result;
         if (rpm<bool>(localPlayer + Offsets::Player_IsDead)) return result;
 
@@ -119,11 +147,26 @@ namespace touch_aim {
 
     inline void step_touch_aim(uint64_t localPlayer,
                                const cfg::RuntimeConfig& rc,
-                               const aimbot::TargetAcquisitionResult& acq,
+                               const TouchTargetResult& acq,
+                               bool isFiring,
                                bool triggerActive,
                                uint64_t stateGen) {
+        const auto now = std::chrono::steady_clock::now();
+        const bool logDue = (s_lastLogTime.time_since_epoch().count() == 0) ||
+            (std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastLogTime).count() >= 500);
+
         if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f ||
             !is_valid_ptr(localPlayer) || !Touch_IsUinputReady()) {
+            if (logDue) {
+                s_lastLogTime = now;
+                write_diag_log("IDLE uinput=%d lp=%d valid=%d firing=%d trig=%d screen=%.0fx%.0f",
+                               Touch_IsUinputReady() ? 1 : 0,
+                               is_valid_ptr(localPlayer) ? 1 : 0,
+                               acq.valid ? 1 : 0,
+                               isFiring ? 1 : 0,
+                               triggerActive ? 1 : 0,
+                               rc.screenW, rc.screenH);
+            }
             release_finger();
             return;
         }
@@ -179,12 +222,12 @@ namespace touch_aim {
 
         const float activeSens = scoped ? s_sensScope : s_sensHip;
         const float userScale = (rc.touchStrength > 0.0f) ? rc.touchStrength : 1.0f;
-        const float gain = (0.76f / activeSens) * userScale;
+        const float gain = (0.85f / activeSens) * userScale;
 
         float stepX = dx * gain;
         float stepY = dy * gain;
         const float stepLen = sqrtf(stepX * stepX + stepY * stepY);
-        const float maxStep = 140.0f * userScale;
+        const float maxStep = 200.0f * userScale;
         if (stepLen > maxStep && stepLen > 1e-4f) {
             const float s = maxStep / stepLen;
             stepX *= s;
@@ -214,6 +257,12 @@ namespace touch_aim {
         s_prevDy      = dy;
         s_lastStepX   = stepX;
         s_lastStepY   = stepY;
+
+        if (logDue) {
+            s_lastLogTime = now;
+            write_diag_log("MOVE scoped=%d err=%.1f dx=%.1f dy=%.1f step=(%.1f,%.1f) finger=(%.1f,%.1f) sens=%.2f",
+                           scoped ? 1 : 0, err, dx, dy, stepX, stepY, s_fingerX, s_fingerY, activeSens);
+        }
     }
 
     inline void touch_loop() {
@@ -246,7 +295,7 @@ namespace touch_aim {
             const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
             const bool triggerActive = (rc.touchTriggerMode == 1) || isFiring;
 
-            step_touch_aim(localPlayer, rc, acq, triggerActive, lastState);
+            step_touch_aim(localPlayer, rc, acq, isFiring, triggerActive, lastState);
 
             waitLock.lock();
         }
@@ -257,6 +306,7 @@ namespace touch_aim {
 
     inline void thread_start() {
         if (g_touch_running.exchange(true)) return;
+        write_diag_log("=== touch_aim started (uinput=%d) ===", Touch_IsUinputReady() ? 1 : 0);
         g_touch_thread = std::thread(touch_loop);
     }
 

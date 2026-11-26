@@ -25,7 +25,6 @@
 #include "other/memory.hpp"
 #include "kpm.h"
 #include "func/esp.hpp"
-#include "func/aim.hpp"
 #include "func/aim/touch_aim.hpp"
 #include "cfg.hpp"
 #include "game/data.hpp"
@@ -759,38 +758,6 @@ namespace ui::menu {
                     DrawToggleSwitch("Master Switch", &cfg::master_enabled, 48.0f * ui_scale, ui_scale);
 
                     ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-
-                    DrawSectionHeader(cdl, "Aim Assist Controls", ui_scale);
-
-                    DrawToggleSwitch("Aimbot Headshot (Max FF)", &cfg::aim::enable, 48.0f * ui_scale, ui_scale);
-                    DrawToggleSwitch("Ignore AI Bots", &cfg::aim::ignore_bots, 48.0f * ui_scale, ui_scale);
-
-                    ImGui::Dummy(ImVec2(0, 10.0f * ui_scale));
-                    DrawSectionHeader(cdl, "Aim Smoothness", ui_scale);
-
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::SliderFloat("##PullStep", &cfg::aim::pull_step_px, 1.0f, 40.0f, "%.0f");
-                    ImGui::TextDisabled("Carry Smoothness (higher = faster head carry)");
-
-                    ImGui::TextDisabled("Official game FOV & range - no custom FOV circle.");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    const char* triggerModes[] = { "When Firing", "Always In FOV" };
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::Combo("##AimTrigger", &cfg::aim::trigger_mode, triggerModes, 2);
-                    ImGui::TextDisabled("Aim Trigger Condition");
-
-                    ImGui::Dummy(ImVec2(0, 6.0f * ui_scale));
-                    const char* priorityModes[] = { "Crosshair Distance", "Lowest HP", "3D Distance" };
-                    ImGui::SetNextItemWidth(-1);
-                    ImGui::Combo("##AimPriority", &cfg::aim::priority_mode, priorityModes, 3);
-                    ImGui::TextDisabled("Target Priority Mode");
-
-                    ImGui::Dummy(ImVec2(0, 8.0f * ui_scale));
-                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Target Engine: Free Fire MAX official range, head only");
-                    ImGui::TextDisabled("No camera write, no aim lock. Official lock stays in charge.");
-
-                    ImGui::Dummy(ImVec2(0, 12.0f * ui_scale));
                     DrawSectionHeader(cdl, "Touch Aim (Zero-Write uinput)", ui_scale);
 
                     DrawToggleSwitch("Touch Head Assist", &cfg::touch_aim_cfg::enable, 48.0f * ui_scale, ui_scale);
@@ -891,7 +858,6 @@ namespace ui::menu {
             log_shield::stop();
             touch_aim::thread_stop();
             Touch_Close();
-            aimbot::thread_stop();
             data::thread_stop();
             shutdown();
             settings_guard::restore();

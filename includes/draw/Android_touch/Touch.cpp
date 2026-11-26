@@ -681,17 +681,20 @@ bool GetFingerScreenPos(int slot, float& outX, float& outY) {
 void Touch_Down_Slot(int slot, float xt, float yt) {
     if (slot < 0 || slot >= maxF) slot = 6;
     if (fdNum <= 0) return;
+    float shortEdge = std::min(screenWidth, screenHeight);
+    float longEdge  = std::max(screenWidth, screenHeight);
+    if (shortEdge <= 0.0f || longEdge <= 0.0f) return;
     float x = 0, y = 0;
     switch (orientation) {
-        case 1: x = screenHeight - yt; y = xt; break;
-        case 2: x = screenWidth - xt; y = screenHeight - yt; break;
-        case 3: y = screenWidth - xt; x = yt; break;
+        case 1: x = shortEdge - yt; y = xt; break;
+        case 2: x = shortEdge - xt; y = longEdge - yt; break;
+        case 3: x = yt; y = longEdge - xt; break;
         default: x = xt; y = yt; break;
     }
     touchObj &touch = Finger[0][slot];
     touch.id = 10 + slot;
-    touch.x = (int)(x * (s_digitizerMaxX / (screenWidth > 0.0f ? screenWidth : 1.0f)));
-    touch.y = (int)(y * (s_digitizerMaxY / (screenHeight > 0.0f ? screenHeight : 1.0f)));
+    touch.x = std::clamp((int)(x * (s_digitizerMaxX / shortEdge)), 0, (int)s_digitizerMaxX);
+    touch.y = std::clamp((int)(y * (s_digitizerMaxY / longEdge)), 0, (int)s_digitizerMaxY);
     touch.isDown = true;
     Upload();
 }

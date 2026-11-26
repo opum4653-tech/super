@@ -63,15 +63,6 @@ namespace esp {
     inline ImVec4 weapon_col      = ImVec4(1.0f, 0.85f, 0.30f, 1.0f);
 }
 
-namespace aim {
-    inline bool  enable           = false; // Aimbot Headshot (Free Fire MAX)
-    inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always Active
-    inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
-    inline bool  ignore_bots      = false;
-
-    inline float pull_step_px     = 22.0f;
-}
-
 namespace touch_aim_cfg {
     inline bool  enable           = false; // Separate Zero-Write uinput Touch Aim
     inline int   trigger_mode     = 0;     // 0 = When Firing, 1 = Always Active
@@ -82,7 +73,7 @@ namespace touch_aim_cfg {
 
 inline bool any_feature_enabled() {
     if (!master_enabled) return false;
-    return aim::enable || touch_aim_cfg::enable ||
+    return touch_aim_cfg::enable ||
            esp::box || esp::health || esp::armor ||
            esp::name || esp::distance || esp::weapon ||
            esp::tracer || esp::loot || esp::crosshair || esp::firing_ind;
@@ -96,11 +87,6 @@ inline bool any_feature_enabled() {
 // ---------------------------------------------------------------------------
 struct RuntimeConfig {
     bool  master            = false;
-    bool  aimEnable         = false;
-    float aimPullStepPx     = 0.0f;
-    bool  aimIgnoreBots     = false;
-    int   aimTriggerMode    = 0;
-    int   aimPriorityMode   = 0;
     bool  touchEnable       = false;
     float touchStrength     = 1.0f;
     bool  touchIgnoreBots   = false;
@@ -125,11 +111,6 @@ struct RuntimeConfig {
 
     bool equals(const RuntimeConfig& o) const {
         return master == o.master &&
-               aimEnable == o.aimEnable &&
-               aimPullStepPx == o.aimPullStepPx &&
-               aimIgnoreBots == o.aimIgnoreBots &&
-               aimTriggerMode == o.aimTriggerMode &&
-               aimPriorityMode == o.aimPriorityMode &&
                touchEnable == o.touchEnable &&
                touchStrength == o.touchStrength &&
                touchIgnoreBots == o.touchIgnoreBots &&
@@ -169,12 +150,7 @@ inline void notify_state_change() {
 
 inline void publish_runtime() {
     RuntimeConfig s;
-    s.master          = master_enabled;
-    s.aimEnable       = aim::enable;
-    s.aimPullStepPx   = aim::pull_step_px;
-    s.aimIgnoreBots   = aim::ignore_bots;
-    s.aimTriggerMode    = aim::trigger_mode;
-    s.aimPriorityMode   = aim::priority_mode;
+    s.master            = master_enabled;
     s.touchEnable       = touch_aim_cfg::enable;
     s.touchStrength     = touch_aim_cfg::strength;
     s.touchIgnoreBots   = touch_aim_cfg::ignore_bots;
