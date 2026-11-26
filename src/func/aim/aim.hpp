@@ -107,8 +107,14 @@ namespace aimbot {
                                 Quaternion targetRot = Quaternion::Normalize(
                                     Quaternion::LookRotation(dir.normalized()));
                                 const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
-                                mem_guard::Scope guard(rotAddr, sizeof(targetRot));
-                                mem_write(rotAddr, &targetRot, sizeof(targetRot));
+                                const Quaternion curRot = rpm<Quaternion>(rotAddr);
+                                const float dot = std::fabs(
+                                    curRot.x * targetRot.x + curRot.y * targetRot.y +
+                                    curRot.z * targetRot.z + curRot.w * targetRot.w);
+                                if (dot < 0.9999f || !std::isfinite(dot)) {
+                                    mem_guard::Scope guard(rotAddr, sizeof(targetRot));
+                                    mem_write(rotAddr, &targetRot, sizeof(targetRot));
+                                }
                                 std::this_thread::sleep_for(std::chrono::milliseconds(sleepDist(gen)));
                             }
                         }

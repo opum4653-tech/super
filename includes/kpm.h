@@ -97,12 +97,14 @@ public:
             diag.neo_result = cmd.result;
             if (r == 0 && cmd.result == 0) {
                 memcpy(ptr, cmd.data, chunk);
+                memset(&cmd, 0, sizeof(cmd));
                 ptr += chunk;
                 curr_addr += chunk;
                 remaining -= chunk;
                 diag.neo_works = true;
                 continue;
             }
+            memset(&cmd, 0, sizeof(cmd));
             return false;
         }
         return true;
@@ -124,7 +126,9 @@ public:
             memcpy(cmd.data, ptr, chunk);
 
             long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_WRITE_MEM, (unsigned long)&cmd, 0, 0);
-            if (r == 0 && cmd.result == 0) {
+            int32_t res = cmd.result;
+            memset(&cmd, 0, sizeof(cmd));
+            if (r == 0 && res == 0) {
                 ptr += chunk;
                 curr_addr += chunk;
                 remaining -= chunk;
@@ -274,32 +278,6 @@ public:
                 }
             }
             fclose(f);
-        }
-
-        if (valid_elf_base != 0) {
-            return valid_elf_base;
-        }
-
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "su -c 'cat /proc/%d/maps | grep %s'", this->pid, name);
-        FILE *pf = popen(cmd, "r");
-        if (pf != nullptr) {
-            char line[1024];
-            while (fgets(line, sizeof(line), pf)) {
-                if (strstr(line, name)) {
-                    uint64_t start = 0, end = 0;
-                    if (sscanf(line, "%lx-%lx", &start, &end) == 2 && start > 0) {
-                        if (first_base == 0) first_base = static_cast<uintptr_t>(start);
-                        uint32_t magic = 0;
-                        if (this->read(static_cast<uintptr_t>(start), &magic, sizeof(magic)) && magic == 0x464C457F) {
-                            valid_elf_base = static_cast<uintptr_t>(start);
-                            diag.last_magic = magic;
-                            break;
-                        }
-                    }
-                }
-            }
-            pclose(pf);
         }
 
         if (valid_elf_base != 0) {
