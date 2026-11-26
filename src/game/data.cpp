@@ -623,9 +623,9 @@ namespace data {
         const bool wantToe     = rc.espBox || rc.espHealth || rc.espArmor ||
                                  rc.espName || rc.espDistance || rc.espWeapon ||
                                  rc.espTracer || rc.espFiringInd || rc.espBotTag;
-        // Aim penalises knocked targets in target.hpp, so the flag must be read
-        // whenever aim is enabled, not only when the ESP box is drawn.
-        const bool wantKnocked = rc.espBox || rc.aimEnable;
+        // Touch aim skips knocked targets, so the flag must be read
+        // whenever touch aim is enabled, not only when the ESP box is drawn.
+        const bool wantKnocked = rc.espBox || rc.touchEnable;
 
         int nv = dict.getNumValues();
         MonoDictionary::EntryBlock blk{};
