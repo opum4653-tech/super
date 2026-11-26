@@ -65,24 +65,11 @@ namespace esp {
 
 namespace aim {
     inline bool  enable           = false; // Aimbot Headshot (Free Fire MAX)
-    inline bool  zero_write       = false; // Player_Rotation (0x61C) smooth Slerp
-    inline bool  show_fov         = false; // Disabled: use official game FOV
-    inline float aim_fov          = 0.0f;  // 0 = use official game FOV cone
-    inline float fov_radius       = 0.0f;
-
-    inline float head_bias        = 0.0f;
-    inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always In FOV
+    inline int   trigger_mode     = 0; // 0 = When Firing, 1 = Always Active
     inline int   priority_mode    = 0; // 0 = Crosshair Distance, 1 = Low HP, 2 = 3D Distance
     inline bool  ignore_bots      = false;
 
-    // Touch drag strength for the head carry. Scaled by AimFov and by how far
-    // inside the circle the head is.
     inline float pull_step_px     = 22.0f;
-
-    inline float get_fov_radius() {
-        // 0 = no code-side FOV limit; use the game's own official range/FOV
-        return 0.0f;
-    }
 }
 
 inline bool any_feature_enabled() {
@@ -101,14 +88,10 @@ inline bool any_feature_enabled() {
 struct RuntimeConfig {
     bool  master            = false;
     bool  aimEnable         = false;
-    bool  aimZeroWrite      = true;
     float aimPullStepPx     = 0.0f;
-    bool  aimShowFov        = false;
     bool  aimIgnoreBots     = false;
     int   aimTriggerMode    = 0;
     int   aimPriorityMode   = 0;
-    float aimFovRadius      = 200.0f;
-    float aimHeadBias       = 0.0f;
     float espMaxRange       = 0.0f;
     float espLootRange      = 0.0f;
     bool  espBox            = false;
@@ -129,14 +112,10 @@ struct RuntimeConfig {
     bool equals(const RuntimeConfig& o) const {
         return master == o.master &&
                aimEnable == o.aimEnable &&
-               aimZeroWrite == o.aimZeroWrite &&
                aimPullStepPx == o.aimPullStepPx &&
-               aimShowFov == o.aimShowFov &&
                aimIgnoreBots == o.aimIgnoreBots &&
                aimTriggerMode == o.aimTriggerMode &&
                aimPriorityMode == o.aimPriorityMode &&
-               aimFovRadius == o.aimFovRadius &&
-               aimHeadBias == o.aimHeadBias &&
                espMaxRange == o.espMaxRange &&
                espLootRange == o.espLootRange &&
                espBox == o.espBox &&
@@ -173,13 +152,10 @@ inline void publish_runtime() {
     RuntimeConfig s;
     s.master          = master_enabled;
     s.aimEnable       = aim::enable;
-    s.aimZeroWrite    = aim::zero_write;
     s.aimPullStepPx   = aim::pull_step_px;
-    s.aimShowFov      = aim::show_fov;
     s.aimIgnoreBots   = aim::ignore_bots;
     s.aimTriggerMode  = aim::trigger_mode;
     s.aimPriorityMode = aim::priority_mode;
-    s.aimHeadBias     = aim::head_bias;
     s.espMaxRange     = esp::max_range;
     s.espLootRange    = esp::loot_range;
     s.espBox          = esp::box;
@@ -196,8 +172,6 @@ inline void publish_runtime() {
     s.anyFeature      = any_feature_enabled();
     s.screenW         = g_sw;
     s.screenH         = g_sh;
-
-    s.aimFovRadius = 0.0f;
 
     bool changed = false;
     {

@@ -60,40 +60,25 @@ namespace aimbot {
 
         float screenCx = rc.screenW * 0.5f;
         float screenCy = rc.screenH * 0.5f;
-        float fovLimit = rc.aimFovRadius;
 
         float bestScore = 9999999.0f;
         const PlayerData* bestEnemy = nullptr;
 
-        // Dynamic crosshair distance scan (matches STORM_MODS lines 1123-1170)
+        // Dynamic crosshair distance scan (official game visibility/range only)
         for (const auto& enemy : enemies) {
-            // A resolved 0 HP means dead. An unresolved HP chain means unknown,
-            // not dead — dropping those would blank the whole target list when
-            // a match uses a different PRIDataPool layout.
             if (enemy.Head.z < 0.001f) continue;
             if (enemy.hpValid && enemy.curHP <= 0) continue;
             if (enemy.isKnocked) continue; // Skip knocked players to prevent unnecessary headshot flags
             if (rc.aimIgnoreBots && enemy.isBot) continue;
-            // No code-side distance limit. The game's official weapon range
-            // decides whether a target is valid; we never filter by distance.
 
-            // No hard screen-rect cull: g_sw/g_sh are captured once at overlay
-            // start, so a mid-match rotation can make valid heads look "outside"
-            // the cached rectangle. The FOV radius below already rejects targets
-            // that are practically unreachable from the crosshair.
             float dxHead = enemy.Head.x - screenCx;
             float dyHead = enemy.Head.y - screenCy;
             float crosshairDist = sqrtf(dxHead * dxHead + dyHead * dyHead);
 
-            // FOV circle filter (matches STORM_MODS isWithinFOV)
-            if (fovLimit > 0.0f && crosshairDist > fovLimit) continue;
-
             float score = crosshairDist;
             if (rc.aimPriorityMode == 1) { // Lowest HP
-                float fovNorm = (fovLimit > 0.0f) ? (crosshairDist / fovLimit) : 0.0f;
-                if (fovNorm > 1.0f) fovNorm = 1.0f;
                 float hpForScore = enemy.hpValid ? static_cast<float>(enemy.curHP) : 200.0f;
-                score = hpForScore + fovNorm * 50.0f;
+                score = hpForScore + crosshairDist * 0.05f;
             } else if (rc.aimPriorityMode == 2) { // 3D Distance
                 score = enemy.distance;
             }
@@ -112,13 +97,6 @@ namespace aimbot {
         if (bestEnemy) {
             result.target = *bestEnemy;
             result.bestScreenPos = bestEnemy->Head;
-            if (rc.aimHeadBias != 0.0f) {
-                const matrix vm = data::get_view_matrix();
-                Vector3 biased = WorldToScreenPoint(vm, bestEnemy->getHeadAimPoint(rc.aimHeadBias));
-                if (biased.z >= 0.001f && std::isfinite(biased.x) && std::isfinite(biased.y)) {
-                    result.bestScreenPos = biased;
-                }
-            }
             result.valid = true;
         }
 
