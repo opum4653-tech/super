@@ -1,10 +1,10 @@
 #pragma once
 // ============================================================================
-// AIMBOT — SAFE RATE-LIMITED PLAYER_ROTATION HEAD CARRY (FREE FIRE MAX)
+// AIMBOT — ONE-SHOT 3MS HEAD DELIVERY (FREE FIRE MAX)
 // ============================================================================
-// Lock-free: no sticky target ID, no collider swap, no AimInfo silent aim,
-// no uinput touch injection. Uses smooth 60Hz Slerp on Player_Rotation (0x61C)
-// with angular step cap and deadzone while firing inside the official FOV cone.
+// Writes targetRot to Player_Rotation (0x61C) only for a brief ~3ms pulse
+// when firing starts, then stops writing completely for the rest of the burst.
+// Zero continuous head lock, zero collider/AimInfo tampering.
 // ============================================================================
 
 #include "common.hpp"
@@ -22,13 +22,47 @@ namespace aimbot {
 
     inline std::atomic<bool> g_aim_running{false};
     inline std::thread       g_aim_thread;
+    inline bool              s_pulseActive = false;
+    inline bool              s_pulseDone   = false;
+    inline uint64_t          s_pulseTarget = 0;
+    inline std::chrono::steady_clock::time_point s_pulseStart{};
+
+    inline void reset_pulse_state() {
+        s_pulseActive = false;
+        s_pulseDone   = false;
+        s_pulseTarget = 0;
+    }
 
     inline void write_head_aim(uint64_t localPlayer,
                                const cfg::RuntimeConfig& rc,
                                const TargetAcquisitionResult& acq,
                                bool triggerActive) {
         if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f || !is_valid_ptr(localPlayer)) {
+            reset_pulse_state();
             return;
+        }
+
+        if (rc.aimTriggerMode == 1 && acq.target.addr != s_pulseTarget) {
+            s_pulseActive = false;
+            s_pulseDone   = false;
+        }
+        if (s_pulseDone) {
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (!s_pulseActive) {
+            s_pulseActive = true;
+            s_pulseTarget = acq.target.addr;
+            s_pulseStart  = now;
+        } else {
+            const auto elapsedMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - s_pulseStart).count();
+            if (elapsedMs >= 3) {
+                s_pulseDone   = true;
+                s_pulseActive = false;
+                return;
+            }
         }
 
         const matrix vm = data::get_view_matrix();
@@ -48,46 +82,8 @@ namespace aimbot {
         const Quaternion targetRot = Quaternion::Normalize(Quaternion::LookRotation(dir.normalized()));
         const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
 
-        // 16ms (~60Hz) frame-paced writes so we never hammer kpm.write at 333Hz
-        static auto s_lastWrite = std::chrono::steady_clock::time_point{};
-        const auto now = std::chrono::steady_clock::now();
-        if (s_lastWrite.time_since_epoch().count() != 0 &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 16) {
-            return;
-        }
-
-        Quaternion currentRot{};
-        bool hasRot = mem_read(rotAddr, &currentRot, sizeof(currentRot));
-        const float qNorm = hasRot ? Quaternion::Norm(currentRot) : 0.0f;
-        if (!hasRot || !std::isfinite(qNorm) || qNorm < 0.5f || qNorm > 1.5f) {
-            Vector3 camFwd = GetCameraForward(vm);
-            currentRot = (camFwd.sqrMagnitude() > 1e-4f)
-                ? Quaternion::Normalize(Quaternion::LookRotation(camFwd))
-                : targetRot;
-        }
-
-        // Deadzone (~1.0 deg): stop writing once already aligned with head
-        float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +
-                          currentRot.z * targetRot.z + currentRot.w * targetRot.w);
-        if (dot > 1.0f) dot = 1.0f;
-        if (dot > 0.99985f) return;
-
-        float t = (rc.aimPullStepPx > 0.0f) ? (rc.aimPullStepPx / 45.0f) : 0.45f;
-        if (!std::isfinite(t) || t < 0.15f) t = 0.15f;
-        if (t > 0.85f) t = 0.85f;
-
-        // Cap per-frame rotation delta to <= 16 deg to avoid instant 1-frame snap flags
-        const float totalAngleRad = 2.0f * acosf(dot);
-        constexpr float kMaxStepRad = 16.0f * (3.14159265f / 180.0f);
-        if (totalAngleRad > 1e-4f && (totalAngleRad * t) > kMaxStepRad) {
-            t = kMaxStepRad / totalAngleRad;
-        }
-
-        const Quaternion outRot = Quaternion::Slerp(currentRot, targetRot, t);
-        mem_guard::Scope guard(rotAddr, sizeof(outRot));
-        if (mem_write(rotAddr, &outRot, sizeof(outRot))) {
-            s_lastWrite = now;
-        }
+        mem_guard::Scope guard(rotAddr, sizeof(targetRot));
+        mem_write(rotAddr, &targetRot, sizeof(targetRot));
     }
 
     inline void clear_target_snapshot() {
@@ -101,10 +97,9 @@ namespace aimbot {
         uint64_t lastState = cfg::g_state_generation;
         std::unique_lock<std::mutex> waitLock(cfg::g_runtime_mutex);
 
-        bool activeTrigger = false;
         while (g_aim_running.load(std::memory_order_relaxed)) {
-            if (activeTrigger) {
-                cfg::g_state_cv.wait_for(waitLock, std::chrono::milliseconds(16), [&]() {
+            if (s_pulseActive && !s_pulseDone) {
+                cfg::g_state_cv.wait_for(waitLock, std::chrono::milliseconds(1), [&]() {
                     return !g_aim_running.load(std::memory_order_relaxed) ||
                            cfg::g_state_generation != lastState;
                 });
@@ -125,7 +120,7 @@ namespace aimbot {
                 ? data::localPlayerAddr.load(std::memory_order_relaxed) : 0;
 
             if (!active || !is_valid_ptr(localPlayer)) {
-                activeTrigger = false;
+                reset_pulse_state();
                 clear_target_snapshot();
                 waitLock.lock();
                 continue;
@@ -140,7 +135,6 @@ namespace aimbot {
 
             const bool isFiring = (rpm<uint8_t>(localPlayer + Offsets::Player_IsFiring) != 0);
             const bool triggerActive = (rc.aimTriggerMode == 1) || isFiring;
-            activeTrigger = triggerActive && acq.valid;
 
             write_head_aim(localPlayer, rc, acq, triggerActive);
 
@@ -148,6 +142,7 @@ namespace aimbot {
         }
 
         waitLock.unlock();
+        reset_pulse_state();
         clear_target_snapshot();
     }
 
@@ -160,6 +155,7 @@ namespace aimbot {
         if (!g_aim_running.exchange(false)) return;
         cfg::notify_state_change();
         if (g_aim_thread.joinable()) g_aim_thread.join();
+        reset_pulse_state();
         clear_target_snapshot();
     }
 
