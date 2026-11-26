@@ -25,6 +25,16 @@ namespace aimbot {
     constexpr int            kAimTouchSlot = 7;
     inline float             s_fingerX = 0.0f;
     inline float             s_fingerY = 0.0f;
+    inline bool              s_carryActive = false;
+    inline bool              s_carryDone   = false;
+    inline uint64_t          s_carryTarget = 0;
+    inline std::chrono::steady_clock::time_point s_carryStart{};
+
+    inline void reset_carry_state() {
+        s_carryActive = false;
+        s_carryDone   = false;
+        s_carryTarget = 0;
+    }
 
     inline void release_aim_finger() {
         if (IsFingerDown(kAimTouchSlot)) Touch_Up_Slot(kAimTouchSlot);
@@ -54,10 +64,12 @@ namespace aimbot {
                                bool triggerActive) {
         if (!triggerActive || !acq.valid || acq.bestScreenPos.z < 0.001f) {
             release_aim_finger();
+            reset_carry_state();
             return;
         }
         if (!is_valid_ptr(localPlayer)) {
             release_aim_finger();
+            reset_carry_state();
             return;
         }
 
@@ -104,7 +116,30 @@ namespace aimbot {
 
         release_aim_finger();
 
-        // 2. Gentle, rate-limited Player_Rotation (0x61C) head alignment (only when Zero-Write is OFF)
+        // 2. Carry-then-release Player_Rotation (0x61C) head guidance (no continuous head lock)
+        if (rc.aimTriggerMode == 1 && acq.target.addr != s_carryTarget) {
+            s_carryActive = false;
+            s_carryDone   = false;
+        }
+        if (s_carryDone) {
+            return;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (!s_carryActive) {
+            s_carryActive = true;
+            s_carryTarget = acq.target.addr;
+            s_carryStart  = now;
+        } else {
+            const auto elapsedMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - s_carryStart).count();
+            if (elapsedMs >= 120) {
+                s_carryDone   = true;
+                s_carryActive = false;
+                return;
+            }
+        }
+
         const matrix vm = data::get_view_matrix();
         const Vector3 camPos = GetCameraPosition(vm);
         if (camPos == Vector3::Zero() || !std::isfinite(camPos.x) ||
@@ -120,40 +155,10 @@ namespace aimbot {
         }
 
         const Quaternion targetRot = Quaternion::Normalize(Quaternion::LookRotation(dir.normalized()));
-
         const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
 
-        Quaternion currentRot{};
-        if (!mem_read(rotAddr, &currentRot, sizeof(currentRot))) return;
-        const float qNorm = Quaternion::Norm(currentRot);
-        if (!std::isfinite(qNorm) || qNorm < 0.5f || qNorm > 1.5f) return;
-
-        // Deadzone (~0.15 deg) so scoped shots stay dead-center on head
-        float dot = fabsf(currentRot.x * targetRot.x + currentRot.y * targetRot.y +
-                          currentRot.z * targetRot.z + currentRot.w * targetRot.w);
-        if (dot > 1.0f) dot = 1.0f;
-        if (dot > 0.999996f) return;
-
-        // 2ms min spacing while firing so chest aim-assist cannot pull aim back down
-        static auto s_lastWrite = std::chrono::steady_clock::time_point{};
-        const auto now = std::chrono::steady_clock::now();
-        if (s_lastWrite.time_since_epoch().count() != 0 &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastWrite).count() < 2) {
-            return;
-        }
-
-        float t = rc.aimPullStepPx / 30.0f;
-        if (!std::isfinite(t) || t < 0.15f) t = 0.15f;
-        if (t > 1.0f) t = 1.0f;
-
-        const Quaternion outRot = (t >= 0.99f)
-            ? targetRot
-            : Quaternion::Slerp(currentRot, targetRot, t);
-
-        mem_guard::Scope guard(rotAddr, sizeof(outRot));
-        if (mem_write(rotAddr, &outRot, sizeof(outRot))) {
-            s_lastWrite = now;
-        }
+        mem_guard::Scope guard(rotAddr, sizeof(targetRot));
+        mem_write(rotAddr, &targetRot, sizeof(targetRot));
     }
 
     inline void clear_target_snapshot() {
@@ -195,6 +200,7 @@ namespace aimbot {
             if (!active || !is_valid_ptr(localPlayer)) {
                 activeTrigger = false;
                 release_aim_finger();
+                reset_carry_state();
                 clear_target_snapshot();
                 waitLock.lock();
                 continue;
@@ -220,6 +226,7 @@ namespace aimbot {
 
         waitLock.unlock();
         release_aim_finger();
+        reset_carry_state();
         clear_target_snapshot();
     }
 
