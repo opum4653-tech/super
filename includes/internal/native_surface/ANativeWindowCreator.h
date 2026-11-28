@@ -14,11 +14,7 @@
 #include "other/display_manager.hpp"
 
 #define ResolveMethod(ClassName, MethodName, Handle, MethodSignature)                                                                    \
-    ClassName##__##MethodName = reinterpret_cast<decltype(ClassName##__##MethodName)>(symbolMethod.Find(Handle, MethodSignature));       \
-    if (nullptr == ClassName##__##MethodName)                                                                                            \
-    {                                                                                                                                    \
-        __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Method not found: %s -> %s::%s", MethodSignature, #ClassName, #MethodName); \
-    }
+    ClassName##__##MethodName = reinterpret_cast<decltype(ClassName##__##MethodName)>(symbolMethod.Find(Handle, MethodSignature));
 
 namespace android {
     namespace detail {
@@ -194,8 +190,6 @@ namespace android {
                 }
 
                 if (systemVersion < 8) {
-                    __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] Unsupported system version: %zu",
-                                        systemVersion);
                     exit(0);
                     return;
                 }
@@ -550,7 +544,6 @@ namespace android {
 
                 StrongPointer<void> result{};
                 if (!Functionals::GetInstance().SurfaceComposerClient__CreateSurface) {
-                    __android_log_print(ANDROID_LOG_ERROR, "ImGui", "[-] SurfaceComposerClient::CreateSurface symbol missing");
                     return {nullptr};
                 }
 
