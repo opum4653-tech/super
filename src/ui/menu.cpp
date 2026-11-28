@@ -22,6 +22,7 @@
 #include "Android_touch/TouchHelperA.h"
 #include "other/settings_guard.hpp"
 #include "other/log_shield.hpp"
+#include "other/firewall_capture.hpp"
 #include "other/guest_reset.hpp"
 #include "other/memory.hpp"
 #include "kpm.h"
@@ -691,6 +692,11 @@ namespace ui::menu {
                     } else {
                         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.4f, 1.0f), "Mode: Active");
                     }
+
+                    ImGui::Dummy(ImVec2(0, 14.0f * ui_scale));
+                    if (TouchButton("KILL / EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 48.0f * ui_scale))) {
+                        g_should_exit = true;
+                    }
                 }
                 // ============================================================
                 // TAB 1: VISUAL (EXACT REPLICA OF USER SCREENSHOT)
@@ -855,13 +861,14 @@ namespace ui::menu {
         // Deferred safe exit outside of ImGui frame
         if (g_should_exit) {
             main_thread_flag = false;
+            firewall_capture::stop();
             log_shield::stop();
             aimbot::thread_stop();
             Touch_Close();
             data::thread_stop();
             shutdown();
             settings_guard::restore();
-            exit(0);
+            _exit(0);
         }
     }
 }
