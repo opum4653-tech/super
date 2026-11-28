@@ -539,7 +539,9 @@ namespace android {
                 void *parentHandle = nullptr;
                 String8 windowName(name);
                 LayerMetadata layerMetadata;
-                uint32_t flags = 0; // Screen recording & screenshot enabled (no eSecure / eSkipScreenshot)
+                uint32_t flags = 0;
+                if (hide) flags |= 0x00000040;   // eSkipScreenshot
+                if (secure) flags |= 0x00000080; // eSecure (blocks screenshots & screen recording)
 
                 if (12 <= Functionals::GetInstance().systemVersion) {
                     static void *fakeParentHandleForBinder = nullptr;
