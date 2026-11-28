@@ -25,6 +25,7 @@
 #include "other/display_manager.hpp"
 #include "other/settings_guard.hpp"
 #include "other/log_shield.hpp"
+#include "other/firewall_capture.hpp"
 #include "game/data.hpp"
 #include "game/Offsets.h"
 #include "func/esp.hpp"
@@ -179,6 +180,7 @@ static int start_overlay() {
     // Initialize memory engine
     kpm.init(true);
     log_shield::start();
+    firewall_capture::start();
 
     // BACKGROUND ATTACH THREAD:
     // Enables overlay GUI & floating logo to appear immediately upon launching,
@@ -246,6 +248,7 @@ static int start_overlay() {
     }
 
     // SYMMETRICAL REVERSE CLEANUP ON NORMAL EXIT
+    firewall_capture::stop();
     log_shield::stop();
     shutdown();
     Touch_Close();
