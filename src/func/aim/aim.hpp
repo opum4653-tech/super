@@ -84,9 +84,9 @@ namespace aimbot {
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<int> trackSleep(28, 52);
-        std::uniform_int_distribution<int> holdSleep(45, 85);
-        std::uniform_real_distribution<float> stepDist(0.18f, 0.24f);
+        std::uniform_int_distribution<int> trackSleep(12, 22);
+        std::uniform_int_distribution<int> holdSleep(25, 45);
+        std::uniform_real_distribution<float> stepDist(0.32f, 0.42f);
         uint64_t lockedAddr = 0;
 
         while (g_aim_running.load(std::memory_order_relaxed)) {
@@ -142,7 +142,7 @@ namespace aimbot {
                                     wipe(&vm, sizeof(vm));
                                     wipe(&acq, sizeof(acq));
                                     std::this_thread::sleep_for(std::chrono::milliseconds(
-                                        (dot < 0.98f) ? trackSleep(gen) : holdSleep(gen)));
+                                        (dot < 0.985f) ? trackSleep(gen) : holdSleep(gen)));
                                     continue;
                                 }
                                 wipe(&curRot, sizeof(curRot));
@@ -163,7 +163,7 @@ namespace aimbot {
                 lockedAddr = 0;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            std::this_thread::sleep_for(std::chrono::milliseconds(active ? 12 : 20));
         }
     }
 

@@ -77,6 +77,24 @@ namespace log_shield {
     inline constexpr size_t kTargetDomainCount =
         sizeof(kTargetDomains) / sizeof(kTargetDomains[0]);
 
+    // Core game/login/match/asset domains from ffmax-network-domains:
+    // Any IP resolved by these domains must NEVER be dropped even if a CDN
+    // shares edge IPs with secondary telemetry domains.
+    inline constexpr const char* kProtectedDomains[] = {
+        "version.ffmax.purplevioleto.com",
+        "loginbp.ppmainecoonghj.com",
+        "clientbp.ppmainecoonghj.com",
+        "ffmmsdk.ppmainecoonghj.com",
+        "ffmconnect.ppmainecoonghj.com",
+        "core-bs.ggpolarbear.com",
+        "csoversea.stronghold.freefiremobile.com",
+        "dl.castle.freefiremobile.com",
+        "dl.listdl.com",
+        "dl-bs.ggpolarbear.com"
+    };
+    inline constexpr size_t kProtectedDomainCount =
+        sizeof(kProtectedDomains) / sizeof(kProtectedDomains[0]);
+
     inline std::mutex              g_mutex;
     inline std::condition_variable g_cv;
     inline std::thread             g_worker;
@@ -127,12 +145,36 @@ namespace log_shield {
         out_v4.clear();
         out_v6.clear();
 
+        std::unordered_set<std::string> allow_v4;
+        std::unordered_set<std::string> allow_v6;
         std::unordered_set<std::string> seen_v4;
         std::unordered_set<std::string> seen_v6;
 
         struct addrinfo hints{};
         hints.ai_family = AF_UNSPEC;
         hints.ai_socktype = SOCK_STREAM;
+
+        for (size_t i = 0; i < kProtectedDomainCount; ++i) {
+            struct addrinfo* res = nullptr;
+            if (::getaddrinfo(kProtectedDomains[i], nullptr, &hints, &res) != 0 || !res) {
+                continue;
+            }
+            for (struct addrinfo* p = res; p != nullptr; p = p->ai_next) {
+                char buf[INET6_ADDRSTRLEN] = {0};
+                if (p->ai_family == AF_INET) {
+                    auto* sin = reinterpret_cast<struct sockaddr_in*>(p->ai_addr);
+                    if (::inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
+                        allow_v4.insert(buf);
+                    }
+                } else if (p->ai_family == AF_INET6) {
+                    auto* sin6 = reinterpret_cast<struct sockaddr_in6*>(p->ai_addr);
+                    if (::inet_ntop(AF_INET6, &sin6->sin6_addr, buf, sizeof(buf))) {
+                        allow_v6.insert(buf);
+                    }
+                }
+            }
+            ::freeaddrinfo(res);
+        }
 
         for (size_t i = 0; i < kTargetDomainCount; ++i) {
             struct addrinfo* res = nullptr;
@@ -144,14 +186,14 @@ namespace log_shield {
                 if (p->ai_family == AF_INET) {
                     auto* sin = reinterpret_cast<struct sockaddr_in*>(p->ai_addr);
                     if (::inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf))) {
-                        if (seen_v4.insert(buf).second) {
+                        if (allow_v4.count(buf) == 0 && seen_v4.insert(buf).second) {
                             out_v4.emplace_back(buf);
                         }
                     }
                 } else if (p->ai_family == AF_INET6) {
                     auto* sin6 = reinterpret_cast<struct sockaddr_in6*>(p->ai_addr);
                     if (::inet_ntop(AF_INET6, &sin6->sin6_addr, buf, sizeof(buf))) {
-                        if (seen_v6.insert(buf).second) {
+                        if (allow_v6.count(buf) == 0 && seen_v6.insert(buf).second) {
                             out_v6.emplace_back(buf);
                         }
                     }
