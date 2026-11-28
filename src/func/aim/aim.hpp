@@ -84,9 +84,9 @@ namespace aimbot {
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<int> trackSleep(12, 22);
-        std::uniform_int_distribution<int> holdSleep(25, 45);
-        std::uniform_real_distribution<float> stepDist(0.32f, 0.42f);
+        std::uniform_int_distribution<int> trackSleep(6, 11);
+        std::uniform_int_distribution<int> holdSleep(10, 16);
+        std::uniform_real_distribution<float> stepDist(0.55f, 0.72f);
         uint64_t lockedAddr = 0;
 
         while (g_aim_running.load(std::memory_order_relaxed)) {
@@ -122,7 +122,7 @@ namespace aimbot {
                                     const float dot = std::fabs(
                                         curRot.x * targetRot.x + curRot.y * targetRot.y +
                                         curRot.z * targetRot.z + curRot.w * targetRot.w);
-                                    if (dot < 0.9999f && std::isfinite(dot)) {
+                                    if (dot < 0.99995f && std::isfinite(dot)) {
                                         const float clampedDot = (dot > 1.0f) ? 1.0f : dot;
                                         const float theta = 2.0f * acosf(clampedDot);
                                         const float maxStep = stepDist(gen);
@@ -163,7 +163,7 @@ namespace aimbot {
                 lockedAddr = 0;
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(active ? 12 : 20));
+            std::this_thread::sleep_for(std::chrono::milliseconds(active ? 8 : 20));
         }
     }
 
