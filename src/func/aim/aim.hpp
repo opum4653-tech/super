@@ -29,7 +29,7 @@ namespace aimbot {
         bool valid = false;
     };
 
-    inline TargetResult select_target(uint64_t localPlayer, const cfg::RuntimeConfig& rc) {
+    inline TargetResult select_target(uint64_t localPlayer, const cfg::RuntimeConfig& rc, uint64_t lockedAddr) {
         TargetResult result;
         if (!is_valid_ptr(localPlayer)) return result;
         if (rpm<bool>(localPlayer + Offsets::Player_IsDead)) return result;
@@ -56,6 +56,9 @@ namespace aimbot {
             float dx = enemy.Head.x - screenCx;
             float dy = enemy.Head.y - screenCy;
             float score = sqrtf(dx * dx + dy * dy);
+            if (lockedAddr != 0 && enemy.addr == lockedAddr) {
+                score *= 0.72f;
+            }
 
             if (score < bestScore) {
                 bestScore = score;
@@ -81,7 +84,10 @@ namespace aimbot {
 
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<int> sleepDist(40, 100);
+        std::uniform_int_distribution<int> trackSleep(28, 52);
+        std::uniform_int_distribution<int> holdSleep(45, 85);
+        std::uniform_real_distribution<float> stepDist(0.18f, 0.24f);
+        uint64_t lockedAddr = 0;
 
         while (g_aim_running.load(std::memory_order_relaxed)) {
             const cfg::RuntimeConfig rc = cfg::runtime();
@@ -95,10 +101,11 @@ namespace aimbot {
                 const bool isSighted = (rc.aimTriggerMode == 1) ? is_player_sighted(localPlayer) : false;
 
                 if (isFiring || isSighted) {
-                    TargetResult acq = select_target(localPlayer, rc);
+                    TargetResult acq = select_target(localPlayer, rc, lockedAddr);
                     if (acq.valid && acq.target.headWorld != Vector3::Zero()) {
-                        const matrix vm = data::get_view_matrix();
-                        const Vector3 camPos = GetCameraPosition(vm);
+                        lockedAddr = acq.target.addr;
+                        matrix vm = data::get_view_matrix();
+                        Vector3 camPos = GetCameraPosition(vm);
                         if (camPos != Vector3::Zero() && std::isfinite(camPos.x) &&
                             std::isfinite(camPos.y) && std::isfinite(camPos.z)) {
                             Vector3 dir = acq.target.headWorld - camPos;
@@ -107,19 +114,53 @@ namespace aimbot {
                                 Quaternion targetRot = Quaternion::Normalize(
                                     Quaternion::LookRotation(dir.normalized()));
                                 const uint64_t rotAddr = localPlayer + Offsets::Player_Rotation;
-                                const Quaternion curRot = rpm<Quaternion>(rotAddr);
-                                const float dot = std::fabs(
-                                    curRot.x * targetRot.x + curRot.y * targetRot.y +
-                                    curRot.z * targetRot.z + curRot.w * targetRot.w);
-                                if (dot < 0.9999f || !std::isfinite(dot)) {
-                                    mem_guard::Scope guard(rotAddr, sizeof(targetRot));
-                                    mem_write(rotAddr, &targetRot, sizeof(targetRot));
+                                Quaternion curRot = rpm<Quaternion>(rotAddr);
+                                const float curSq =
+                                    curRot.x * curRot.x + curRot.y * curRot.y +
+                                    curRot.z * curRot.z + curRot.w * curRot.w;
+                                if (std::isfinite(curSq) && curSq >= 0.5f && curSq <= 1.5f) {
+                                    const float dot = std::fabs(
+                                        curRot.x * targetRot.x + curRot.y * targetRot.y +
+                                        curRot.z * targetRot.z + curRot.w * targetRot.w);
+                                    if (dot < 0.9999f && std::isfinite(dot)) {
+                                        const float clampedDot = (dot > 1.0f) ? 1.0f : dot;
+                                        const float theta = 2.0f * acosf(clampedDot);
+                                        const float maxStep = stepDist(gen);
+                                        const float t = (theta > maxStep && theta > 1e-4f)
+                                            ? (maxStep / theta) : 1.0f;
+                                        Quaternion writeRot = (t < 1.0f)
+                                            ? Quaternion::Normalize(Quaternion::Slerp(curRot, targetRot, t))
+                                            : targetRot;
+                                        mem_guard::Scope guard(rotAddr, sizeof(writeRot));
+                                        mem_write(rotAddr, &writeRot, sizeof(writeRot));
+                                        wipe(&writeRot, sizeof(writeRot));
+                                    }
+                                    wipe(&curRot, sizeof(curRot));
+                                    wipe(&targetRot, sizeof(targetRot));
+                                    wipe(&dir, sizeof(dir));
+                                    wipe(&camPos, sizeof(camPos));
+                                    wipe(&vm, sizeof(vm));
+                                    wipe(&acq, sizeof(acq));
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(
+                                        (dot < 0.98f) ? trackSleep(gen) : holdSleep(gen)));
+                                    continue;
                                 }
-                                std::this_thread::sleep_for(std::chrono::milliseconds(sleepDist(gen)));
+                                wipe(&curRot, sizeof(curRot));
+                                wipe(&targetRot, sizeof(targetRot));
                             }
+                            wipe(&dir, sizeof(dir));
                         }
+                        wipe(&camPos, sizeof(camPos));
+                        wipe(&vm, sizeof(vm));
+                    } else {
+                        lockedAddr = 0;
                     }
+                    wipe(&acq, sizeof(acq));
+                } else {
+                    lockedAddr = 0;
                 }
+            } else {
+                lockedAddr = 0;
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(20));

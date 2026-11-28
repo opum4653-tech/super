@@ -31,6 +31,7 @@
 
 // ==================== NINMODS KPM DEFINITIONS ====================
 #define NA_PRCTL_MAGIC      0x4E41
+#define NA_PRCTL_AUTH       0x4E494E4D4F445331ULL
 #define NA_CMD_READ_MEM     1
 #define NA_CMD_WRITE_MEM    2
 #define NA_CMD_GET_PID      5
@@ -91,7 +92,7 @@ public:
             cmd.size = (uint32_t)chunk;
 
             errno = 0;
-            long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_READ_MEM, (unsigned long)&cmd, 0, 0);
+            long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_READ_MEM, (unsigned long)&cmd, NA_PRCTL_AUTH, 0);
             diag.neo_ret = (int)r;
             diag.neo_errno = errno;
             diag.neo_result = cmd.result;
@@ -125,7 +126,7 @@ public:
             cmd.size = (uint32_t)chunk;
             memcpy(cmd.data, ptr, chunk);
 
-            long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_WRITE_MEM, (unsigned long)&cmd, 0, 0);
+            long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_WRITE_MEM, (unsigned long)&cmd, NA_PRCTL_AUTH, 0);
             int32_t res = cmd.result;
             memset(&cmd, 0, sizeof(cmd));
             if (r == 0 && res == 0) {
@@ -156,7 +157,7 @@ public:
         cmd.addr = reinterpret_cast<uint64_t>(&test_val);
         cmd.size = sizeof(test_val);
         errno = 0;
-        long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_READ_MEM, (unsigned long)&cmd, 0, 0);
+        long r = syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_READ_MEM, (unsigned long)&cmd, NA_PRCTL_AUTH, 0);
         if (r == 0 && cmd.result == 0) {
             memcpy(&neo_canary, cmd.data, sizeof(neo_canary));
         }
@@ -166,7 +167,8 @@ public:
         diag.neo_works = (r == 0 && cmd.result == 0 && neo_canary == test_val);
 
         if (diag.neo_works) {
-            snprintf(diag.status_str, sizeof(diag.status_str), "NinMods KPM Active");
+            snprintf(diag.status_str, sizeof(diag.status_str), "NinMods KPM Active (PhysWalk: %s)",
+                     cmd.screen_w ? "ON" : "OFF");
             diag.is_connected = true;
         } else {
             snprintf(diag.status_str, sizeof(diag.status_str), "NinMods KPM Disconnected");
@@ -247,7 +249,7 @@ public:
         memset(&cmd, 0, sizeof(cmd));
         cmd.op = NA_CMD_GET_PID;
         strncpy(cmd.pkg, pkg_name, sizeof(cmd.pkg) - 1);
-        if (syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_GET_PID, (unsigned long)&cmd, 0, 0) == 0 && cmd.result == 0 && cmd.pid > 0) {
+        if (syscall(__NR_prctl, NA_PRCTL_MAGIC, NA_CMD_GET_PID, (unsigned long)&cmd, NA_PRCTL_AUTH, 0) == 0 && cmd.result == 0 && cmd.pid > 0) {
             return static_cast<pid_t>(cmd.pid);
         }
         return -1;

@@ -56,7 +56,7 @@ namespace log_shield {
         int   ip6Count = 0;
     };
 
-    inline constexpr const char* kChainName = "NIN_LOG_SHIELD";
+    inline constexpr const char* kChainName = "SYS_NET_FILTER";
 
     // Strictly the 12 unimportant secondary log/crash/analytics/tracker domains
     // captured in firewall.txt. Core login/match/asset domains are NEVER touched.
