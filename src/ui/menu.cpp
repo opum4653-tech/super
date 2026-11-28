@@ -22,6 +22,7 @@
 #include "Android_touch/TouchHelperA.h"
 #include "other/settings_guard.hpp"
 #include "other/log_shield.hpp"
+#include "other/guest_reset.hpp"
 #include "other/memory.hpp"
 #include "kpm.h"
 #include "func/esp.hpp"
@@ -815,7 +816,22 @@ namespace ui::menu {
                     ImGui::SliderFloat("##Opacity", &ui_opacity, 0.2f, 1.0f, "Opacity: %.2f");
                     ImGui::TextDisabled("Menu Window Opacity");
 
-                    ImGui::Dummy(ImVec2(0, 20.0f * ui_scale));
+                    ImGui::Dummy(ImVec2(0, 12.0f * ui_scale));
+                    if (TouchButton("RESET GUEST ACCOUNT", ImVec2(ImGui::GetContentRegionAvail().x, 44.0f * ui_scale))) {
+                        guest_reset::trigger();
+                    }
+                    {
+                        int gs = guest_reset::g_state.load();
+                        if (gs == 1) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Resetting guest...");
+                        } else if (gs == 2) {
+                            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Guest reset done! Reopen game.");
+                        } else if (gs == 3) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Guest reset failed.");
+                        }
+                    }
+
+                    ImGui::Dummy(ImVec2(0, 12.0f * ui_scale));
                     if (TouchButton("SAFE EXIT APPLICATION", ImVec2(ImGui::GetContentRegionAvail().x, 48.0f * ui_scale))) {
                         g_should_exit = true;
                     }
